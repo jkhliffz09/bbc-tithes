@@ -113,6 +113,13 @@ function requirePermission(action) {
   }
 }
 
+function performLogout() {
+  sessionUser = null;
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('app:loggedOut');
+  }
+}
+
 function requireEntryAdminApproval(payload, action, targetEntryId) {
   const role = getRole();
   if (!['Deacons', 'Accounting'].includes(role || '')) return;
@@ -343,6 +350,8 @@ function buildAppMenu() {
           ],
         },
         { type: 'separator' },
+        { label: 'Logout', click: menuAction(() => performLogout()) },
+        { type: 'separator' },
         ...(process.platform === 'darwin' ? [{ role: 'close' }] : [{ role: 'quit' }]),
       ],
     },
@@ -370,7 +379,7 @@ app.whenReady().then(() => {
   ipcMain.handle(
     'auth:logout',
     withErrorHandling(() => {
-      sessionUser = null;
+      performLogout();
       return { ok: true, data: { success: true } };
     })
   );

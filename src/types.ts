@@ -119,6 +119,7 @@ declare global {
       exportAppWorkbook: () => Promise<ImportExportResult>;
       exportFullBackup: () => Promise<ImportExportResult>;
       importFullBackup: () => Promise<ImportExportResult>;
+      onLoggedOut: (callback: () => void) => () => void;
     };
   }
 }

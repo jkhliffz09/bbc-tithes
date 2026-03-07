@@ -35,6 +35,10 @@ type UserForm = {
   isActive: boolean;
 };
 
+type PendingEntryAction =
+  | { type: 'update'; payload: { id: number; memberId: number; serviceDate: string; serviceType: ServiceType; tithes: number; faithPromise: number; looseOfferings: number; thanksgiving: number; notes: string } }
+  | { type: 'delete'; entryId: number };
+
 const ROLE_OPTIONS: Role[] = ['Admin', 'Deacons', 'Accounting', 'Users'];
 
 function toISODate(d: Date): string {
@@ -105,7 +109,21 @@ function money(v: number): string {
   return new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP' }).format(v || 0);
 }
 
-function can(role: Role | null, action: string): boolean {
+function normalizeRole(role: unknown): Role | null {
+  const value = String(role || '').trim().toLowerCase();
+  if (value === 'admin') return 'Admin';
+  if (value === 'deacons' || value === 'deacon') return 'Deacons';
+  if (value === 'accounting') return 'Accounting';
+  if (value === 'users' || value === 'user') return 'Users';
+  return null;
+}
+
+function requiresAdminEntryApproval(role: Role | null): boolean {
+  return role === 'Deacons' || role === 'Accounting';
+}
+
+function can(roleInput: Role | string | null, action: string): boolean {
+  const role = normalizeRole(roleInput);
   if (!role) return false;
   const matrix: Record<Role, Set<string>> = {
     Admin: new Set([
@@ -179,6 +197,8 @@ function App() {
     dateTo: initialDate,
   });
   const [report, setReport] = useState<ReportPayload | null>(null);
+  const [pendingEntryAction, setPendingEntryAction] = useState<PendingEntryAction | null>(null);
+  const [adminApproval, setAdminApproval] = useState({ adminUsername: '', adminPassword: '', adminNote: '' });
 
   async function run<T>(label: string, fn: () => Promise<T>) {
     setError('');
@@ -272,6 +292,20 @@ function App() {
   }, []);
 
   useEffect(() => {
+    const unsubscribe = window.faithflow.onLoggedOut(() => {
+      setAuthUser(null);
+      setMembers([]);
+      setEntries([]);
+      setReport(null);
+      setUsers([]);
+      setMemberEntrySearch('');
+      setToast('');
+      setError('');
+    });
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
     if (!authUser) return;
     void loadMembers('');
     void loadEntries(initialMonth);
@@ -287,14 +321,6 @@ function App() {
     if (!user) return;
     setAuthUser(user);
     setLoginForm({ username: '', password: '' });
-  }
-
-  async function logout() {
-    await run('', () => window.faithflow.logout());
-    setAuthUser(null);
-    setMembers([]);
-    setEntries([]);
-    setReport(null);
   }
 
   async function submitUser(event: FormEvent) {
@@ -415,15 +441,13 @@ function App() {
     };
 
     if (entryForm.id) {
-      let override: { adminUsername?: string; adminPassword?: string; adminNote?: string } = {};
-      if (authUser?.role === 'Deacons' || authUser?.role === 'Accounting') {
-        const adminUsername = window.prompt('Admin username required:') || '';
-        const adminPassword = window.prompt('Admin password required:') || '';
-        const adminNote = window.prompt('Security note (reason for edit):') || '';
-        override = { adminUsername, adminPassword, adminNote };
+      if (requiresAdminEntryApproval(normalizeRole(authUser?.role))) {
+        setPendingEntryAction({ type: 'update', payload: { id: entryForm.id as number, ...payload } });
+        setAdminApproval({ adminUsername: '', adminPassword: '', adminNote: '' });
+        return;
       }
       await run('Giving entry updated.', () =>
-        window.faithflow.updateEntry({ id: entryForm.id as number, ...payload, ...override })
+        window.faithflow.updateEntry({ id: entryForm.id as number, ...payload })
       );
     } else {
       await run('Giving entry recorded.', () => window.faithflow.createEntry(payload));
@@ -443,19 +467,59 @@ function App() {
     const ok = window.confirm('Delete this giving entry?');
     if (!ok) return;
 
-    if (authUser?.role === 'Deacons' || authUser?.role === 'Accounting') {
-      const adminUsername = window.prompt('Admin username required:') || '';
-      const adminPassword = window.prompt('Admin password required:') || '';
-      const adminNote = window.prompt('Security note (reason for delete):') || '';
-      await run('Giving entry deleted.', () =>
-        window.faithflow.deleteEntry({ id, adminUsername, adminPassword, adminNote })
-      );
-    } else {
-      await run('Giving entry deleted.', () => window.faithflow.deleteEntry({ id }));
+    if (requiresAdminEntryApproval(normalizeRole(authUser?.role))) {
+      setPendingEntryAction({ type: 'delete', entryId: id });
+      setAdminApproval({ adminUsername: '', adminPassword: '', adminNote: '' });
+      return;
     }
+    await run('Giving entry deleted.', () => window.faithflow.deleteEntry({ id }));
 
     setEntryForm({ ...emptyEntryForm, serviceDate: initialDate });
     setMemberEntrySearch('');
+    await loadEntries();
+    await generateReport();
+  }
+
+  async function submitAdminApproval(event: FormEvent) {
+    event.preventDefault();
+    if (!pendingEntryAction) return;
+    if (!adminApproval.adminNote.trim()) {
+      setError('Admin note is required for this action.');
+      return;
+    }
+
+    if (pendingEntryAction.type === 'update') {
+      const updated = await run('Giving entry updated.', () =>
+        window.faithflow.updateEntry({
+          ...pendingEntryAction.payload,
+          adminUsername: adminApproval.adminUsername,
+          adminPassword: adminApproval.adminPassword,
+          adminNote: adminApproval.adminNote,
+        })
+      );
+      if (!updated) return;
+      setEntryForm({
+        ...emptyEntryForm,
+        serviceDate: pendingEntryAction.payload.serviceDate,
+        serviceType: deriveServiceTypeFromDate(pendingEntryAction.payload.serviceDate),
+      });
+      setMemberEntrySearch('');
+    } else {
+      const deleted = await run('Giving entry deleted.', () =>
+        window.faithflow.deleteEntry({
+          id: pendingEntryAction.entryId,
+          adminUsername: adminApproval.adminUsername,
+          adminPassword: adminApproval.adminPassword,
+          adminNote: adminApproval.adminNote,
+        })
+      );
+      if (!deleted) return;
+      setEntryForm({ ...emptyEntryForm, serviceDate: initialDate });
+      setMemberEntrySearch('');
+    }
+
+    setPendingEntryAction(null);
+    setAdminApproval({ adminUsername: '', adminPassword: '', adminNote: '' });
     await loadEntries();
     await generateReport();
   }
@@ -475,52 +539,6 @@ function App() {
       notes: entry.notes || '',
     });
     setTab('entries');
-  }
-
-  async function importMembersTemplate() {
-    const result = await run('', () => window.faithflow.importMembersTemplate());
-    if (!result || result.canceled) return;
-    setToast(`Imported ${result.imported ?? 0} members from template.`);
-    await loadMembers('');
-  }
-
-  async function importWorkbook() {
-    const result = await run('', () => window.faithflow.importAppWorkbook());
-    if (!result || result.canceled) return;
-    setToast(
-      `Workbook imported: ${result.memberCount ?? 0} members, ${result.entryCount ?? 0} entries.`
-    );
-    await loadMembers('');
-    await loadEntries();
-    await generateReport();
-  }
-
-  async function exportWorkbook() {
-    const result = await run('', () => window.faithflow.exportAppWorkbook());
-    if (!result || result.canceled) return;
-    setToast(`Workbook exported to ${result.path || 'selected path'}.`);
-  }
-
-  async function exportFullBackup() {
-    const result = await run('', () => window.faithflow.exportFullBackup());
-    if (!result || result.canceled) return;
-    setToast(`Full backup exported to ${result.path || 'selected path'}.`);
-  }
-
-  async function importFullBackup() {
-    const ok = window.confirm(
-      'Importing full backup will REPLACE current members, entries, users, and approvals. Continue?'
-    );
-    if (!ok) return;
-    const result = await run('', () => window.faithflow.importFullBackup());
-    if (!result || result.canceled) return;
-    setToast(
-      `Full backup imported: ${result.memberCount ?? 0} members, ${result.entryCount ?? 0} entries, ${result.userCount ?? 0} users.`
-    );
-    await loadMembers('');
-    await loadEntries();
-    await generateReport();
-    await loadUsers();
   }
 
   async function exportReportExcel() {
@@ -568,9 +586,11 @@ function App() {
     );
   }
 
-  const role = authUser.role;
+  const role = normalizeRole(authUser.role);
+  const canEditEntries = can(role, 'entries.update') || requiresAdminEntryApproval(role);
+  const canDeleteEntries = can(role, 'entries.delete') || requiresAdminEntryApproval(role);
   const canUpdateEntryInForm = entryForm.id
-    ? can(role, 'entries.update') || role === 'Deacons'
+    ? canEditEntries
     : can(role, 'entries.create');
 
   return (
@@ -582,24 +602,6 @@ function App() {
             <h1>FaithFlow - BBC Tithes and Offerings</h1>
             <p>Signed in as {authUser.fullName} ({authUser.role})</p>
           </div>
-        </div>
-        <div className="toolbar-actions">
-          {can(role, 'members.importTemplate') && (
-            <button onClick={importMembersTemplate} disabled={busy}>Import Members Template</button>
-          )}
-          {can(role, 'workbook.import') && (
-            <button onClick={importWorkbook} disabled={busy}>Import FaithFlow Workbook</button>
-          )}
-          {can(role, 'workbook.export') && (
-            <button onClick={exportWorkbook} disabled={busy}>Export Workbook</button>
-          )}
-          {can(role, 'backup.export') && (
-            <button onClick={exportFullBackup} disabled={busy}>Export Full Backup</button>
-          )}
-          {can(role, 'backup.import') && (
-            <button onClick={importFullBackup} disabled={busy}>Import Full Backup</button>
-          )}
-          <button className="secondary" onClick={logout}>Logout</button>
         </div>
       </header>
 
@@ -700,8 +702,8 @@ function App() {
                         <td>{member.birthday || '-'}</td>
                         <td>
                           <div className="inline-actions">
-                            {can(role, 'members.update') && <button className="tiny" onClick={() => editMember(member)}>Edit</button>}
-                            {can(role, 'members.delete') && <button className="tiny danger" onClick={() => removeMember(member.id)}>Delete</button>}
+                            {can(role, 'members.update') && <button type="button" className="tiny" onClick={() => editMember(member)}>Edit</button>}
+                            {can(role, 'members.delete') && <button type="button" className="tiny danger" onClick={() => removeMember(member.id)}>Delete</button>}
                           </div>
                         </td>
                       </tr>
@@ -875,8 +877,8 @@ function App() {
                           <td>{money(total)}</td>
                           <td>
                             <div className="inline-actions">
-                              {(can(role, 'entries.update') || role === 'Deacons') && <button className="tiny" onClick={() => editEntry(entry)}>Edit</button>}
-                              {(can(role, 'entries.delete') || role === 'Deacons') && <button className="tiny danger" onClick={() => removeEntry(entry.id)}>Delete</button>}
+                              {canEditEntries && <button type="button" className="tiny" onClick={() => editEntry(entry)}>Edit</button>}
+                              {canDeleteEntries && <button type="button" className="tiny danger" onClick={() => removeEntry(entry.id)}>Delete</button>}
                             </div>
                           </td>
                         </tr>
@@ -1031,9 +1033,9 @@ function App() {
                         <td>{u.isActive ? 'Yes' : 'No'}</td>
                         <td>
                           <div className="inline-actions">
-                            <button className="tiny" onClick={() => editUser(u)}>Edit</button>
+                            <button type="button" className="tiny" onClick={() => editUser(u)}>Edit</button>
                             {authUser.id !== u.id && (
-                              <button className="tiny danger" onClick={() => removeUser(u.id)}>Delete</button>
+                              <button type="button" className="tiny danger" onClick={() => removeUser(u.id)}>Delete</button>
                             )}
                           </div>
                         </td>
@@ -1046,6 +1048,59 @@ function App() {
           </section>
         )}
       </main>
+      {pendingEntryAction && (
+        <div className="modal-backdrop" role="presentation">
+          <section className="modal-card">
+            <h3>Admin Approval Required</h3>
+            <p className="muted">
+              For security purposes, this {pendingEntryAction.type === 'delete' ? 'delete' : 'edit'} action needs Admin credentials and note.
+            </p>
+            <form className="form" onSubmit={submitAdminApproval}>
+              <label>
+                Admin Username
+                <input
+                  value={adminApproval.adminUsername}
+                  onChange={(e) => setAdminApproval((p) => ({ ...p, adminUsername: e.target.value }))}
+                  required
+                />
+              </label>
+              <label>
+                Admin Password
+                <input
+                  type="password"
+                  value={adminApproval.adminPassword}
+                  onChange={(e) => setAdminApproval((p) => ({ ...p, adminPassword: e.target.value }))}
+                  required
+                />
+              </label>
+              <label>
+                Notes
+                <textarea
+                  rows={3}
+                  value={adminApproval.adminNote}
+                  onChange={(e) => setAdminApproval((p) => ({ ...p, adminNote: e.target.value }))}
+                  required
+                />
+              </label>
+              <div className="row-actions">
+                <button type="submit" disabled={busy}>
+                  Confirm
+                </button>
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() => {
+                    setPendingEntryAction(null);
+                    setAdminApproval({ adminUsername: '', adminPassword: '', adminNote: '' });
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </section>
+        </div>
+      )}
     </div>
   );
 }

@@ -37,4 +37,9 @@ contextBridge.exposeInMainWorld('faithflow', {
   exportAppWorkbook: () => invoke('excel:exportAppWorkbook'),
   exportFullBackup: () => invoke('backup:exportFull'),
   importFullBackup: () => invoke('backup:importFull'),
+  onLoggedOut: (callback) => {
+    const handler = () => callback();
+    ipcRenderer.on('app:loggedOut', handler);
+    return () => ipcRenderer.removeListener('app:loggedOut', handler);
+  },
 });

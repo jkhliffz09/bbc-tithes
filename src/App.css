@@ -58,6 +58,7 @@ textarea {
 .topbar h1 {
   margin: 0;
   font-size: 1.55rem;
+  white-space: nowrap;
 }
 
 .brand {
@@ -322,6 +323,29 @@ tfoot th {
   padding: 8px 10px;
   background: #f5f9ff;
   font-size: 0.92rem;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(10, 26, 46, 0.42);
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  z-index: 50;
+}
+
+.modal-card {
+  width: min(500px, 100%);
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.2);
+}
+
+.modal-card h3 {
+  margin: 0 0 8px;
 }
 
 @media (max-width: 1080px) {
