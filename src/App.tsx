@@ -182,7 +182,7 @@ function App() {
   const [entryForm, setEntryForm] = useState<EntryForm>(emptyEntryForm);
 
   const [reportRange, setReportRange] = useState({
-    dateFrom: `${startDate.getFullYear()}-01-01`,
+    dateFrom: initialDate,
     dateTo: initialDate,
   });
   const [reportSignatory, setReportSignatory] = useState({
@@ -318,6 +318,20 @@ function App() {
     });
     return () => unsubscribe();
   }, []);
+
+  useEffect(() => {
+    const unsubscribe = window.faithflow.onDataChanged((payload) => {
+      if (!authUser) return;
+      void loadMembers('');
+      void loadEntries(selectedDate);
+      void loadUsers();
+      void loadDeacons();
+      void generateReport();
+      setToast(payload?.message || 'Data imported and reloaded.');
+    });
+    return () => unsubscribe();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authUser?.id, selectedDate]);
 
   useEffect(() => {
     if (!authUser) return;
@@ -636,6 +650,7 @@ function App() {
     return (
       <div className="app-shell login-shell">
         <section className="panel login-panel">
+          <img src="logo-placeholder.svg" alt="BBC Logo" className="login-logo" />
           <h1>FaithFlow - BBC Tithes and Offerings</h1>
           <p>Sign in to continue.</p>
           <form className="form" onSubmit={login}>
@@ -702,7 +717,7 @@ function App() {
 
       <main className="content">
         {tab === 'members' && (
-          <section className="panel grid-2">
+          <section className="panel grid-2 split-panels">
             <article>
               <h2>{memberForm.id ? 'Edit Member' : 'Add Member'}</h2>
               <form className="form" onSubmit={submitMember}>
@@ -799,7 +814,7 @@ function App() {
         )}
 
         {tab === 'entries' && (
-          <section className="panel grid-2">
+          <section className="panel grid-2 split-panels">
             <article>
               <h2>{entryForm.id ? 'Edit Giving Entry' : 'Record Giving Entry'}</h2>
               <form className="form" onSubmit={submitEntry}>

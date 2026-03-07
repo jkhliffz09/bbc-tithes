@@ -43,4 +43,9 @@ contextBridge.exposeInMainWorld('faithflow', {
     ipcRenderer.on('app:loggedOut', handler);
     return () => ipcRenderer.removeListener('app:loggedOut', handler);
   },
+  onDataChanged: (callback) => {
+    const handler = (_event, payload) => callback(payload);
+    ipcRenderer.on('app:dataChanged', handler);
+    return () => ipcRenderer.removeListener('app:dataChanged', handler);
+  },
 });

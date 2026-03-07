@@ -131,6 +131,9 @@ class DataService {
   }
 
   seedDefaultUsers() {
+    const existingCount = this.db.prepare('SELECT COUNT(*) AS count FROM users').get();
+    if (Number(existingCount?.count || 0) > 0) return;
+
     const seedUsers = [
       {
         username: 'admin',
@@ -158,7 +161,6 @@ class DataService {
       },
     ];
 
-    const exists = this.db.prepare('SELECT id FROM users WHERE username = ?');
     const insert = this.db.prepare(
       `INSERT INTO users (username, full_name, role, password_hash, is_active, created_at, updated_at)
        VALUES (@username, @fullName, @role, @passwordHash, 1, @createdAt, @updatedAt)`
@@ -167,7 +169,6 @@ class DataService {
     const now = this.now();
 
     for (const user of seedUsers) {
-      if (exists.get(user.username)) continue;
       insert.run({
         username: user.username,
         fullName: user.fullName,

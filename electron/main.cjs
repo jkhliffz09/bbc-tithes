@@ -248,7 +248,16 @@ async function importMembersTemplateFlow() {
     filters: [{ name: 'Excel Workbook', extensions: ['xlsx', 'xls'] }],
   });
   if (selected.canceled || selected.filePaths.length === 0) return { canceled: true };
-  return dataService.importMembersTemplate(selected.filePaths[0]);
+  const result = dataService.importMembersTemplate(selected.filePaths[0]);
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('app:dataChanged', { message: 'Members template import completed.' });
+  }
+  await dialog.showMessageBox({
+    type: 'info',
+    title: 'Import Completed',
+    message: `Members imported: ${Number(result?.imported || 0)}.`,
+  });
+  return result;
 }
 
 async function importWorkbookFlow() {
@@ -259,7 +268,16 @@ async function importWorkbookFlow() {
     filters: [{ name: 'Excel Workbook', extensions: ['xlsx'] }],
   });
   if (selected.canceled || selected.filePaths.length === 0) return { canceled: true };
-  return dataService.importAppWorkbook(selected.filePaths[0]);
+  const result = dataService.importAppWorkbook(selected.filePaths[0]);
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('app:dataChanged', { message: 'Workbook import completed.' });
+  }
+  await dialog.showMessageBox({
+    type: 'info',
+    title: 'Import Completed',
+    message: `Workbook import done.\nMembers: ${Number(result?.memberCount || 0)}\nEntries: ${Number(result?.entryCount || 0)}`,
+  });
+  return result;
 }
 
 async function exportWorkbookFlow() {
@@ -292,7 +310,16 @@ async function importFullBackupFlow() {
     filters: [{ name: 'FaithFlow Backup', extensions: ['json', 'faithflow.json'] }],
   });
   if (selected.canceled || selected.filePaths.length === 0) return { canceled: true };
-  return dataService.importFullBackup(selected.filePaths[0]);
+  const result = dataService.importFullBackup(selected.filePaths[0]);
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('app:dataChanged', { message: 'Full backup import completed.' });
+  }
+  await dialog.showMessageBox({
+    type: 'info',
+    title: 'Import Completed',
+    message: `Full backup import done.\nMembers: ${Number(result?.memberCount || 0)}\nEntries: ${Number(result?.entryCount || 0)}\nUsers: ${Number(result?.userCount || 0)}`,
+  });
+  return result;
 }
 
 async function checkForUpdatesManual() {

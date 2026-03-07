@@ -40,6 +40,14 @@ textarea {
 
 .login-panel {
   width: min(520px, 100%);
+  text-align: center;
+}
+
+.login-logo {
+  width: 88px;
+  height: 88px;
+  object-fit: contain;
+  margin: 4px auto 8px;
 }
 
 .muted {
@@ -117,6 +125,19 @@ textarea {
   display: grid;
   grid-template-columns: minmax(300px, 400px) 1fr;
   gap: 16px;
+}
+
+.split-panels {
+  background: transparent;
+  border: none;
+  padding: 0;
+}
+
+.split-panels > article {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px;
 }
 
 .panel.single {

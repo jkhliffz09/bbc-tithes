@@ -132,6 +132,7 @@ declare global {
       exportFullBackup: () => Promise<ImportExportResult>;
       importFullBackup: () => Promise<ImportExportResult>;
       onLoggedOut: (callback: () => void) => () => void;
+      onDataChanged: (callback: (payload?: { message?: string }) => void) => () => void;
     };
   }
 }
