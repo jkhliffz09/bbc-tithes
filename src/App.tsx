@@ -59,6 +59,19 @@ type DuplicateEntryDialog = {
 };
 
 type SyncDialogMode = 'upload' | 'download' | null;
+type SyncConfig = {
+  serverUrl: string;
+  apiToken: string;
+  churchKey: string;
+  passphrase: string;
+};
+
+const SYNC_STORAGE_KEYS = {
+  serverUrl: 'faithflow.sync.serverUrl',
+  apiToken: 'faithflow.sync.apiToken',
+  churchKey: 'faithflow.sync.churchKey',
+  passphrase: 'faithflow.sync.passphrase',
+};
 
 const ROLE_OPTIONS: Role[] = ['Superadmin', 'Admin', 'Deacon', 'Accounting', 'Users'];
 
@@ -253,12 +266,51 @@ function App() {
   const [adminApproval, setAdminApproval] = useState({ adminUsername: '', adminPassword: '', adminNote: '' });
   const [duplicateDialog, setDuplicateDialog] = useState<DuplicateEntryDialog | null>(null);
   const [syncMode, setSyncMode] = useState<SyncDialogMode>(null);
-  const [syncForm, setSyncForm] = useState({
-    serverUrl: localStorage.getItem('faithflow.sync.serverUrl') || '',
-    apiToken: '',
-    churchKey: localStorage.getItem('faithflow.sync.churchKey') || '',
-    passphrase: '',
+  const [syncForm, setSyncForm] = useState<SyncConfig>({
+    serverUrl: localStorage.getItem(SYNC_STORAGE_KEYS.serverUrl) || '',
+    apiToken: localStorage.getItem(SYNC_STORAGE_KEYS.apiToken) || '',
+    churchKey: localStorage.getItem(SYNC_STORAGE_KEYS.churchKey) || '',
+    passphrase: localStorage.getItem(SYNC_STORAGE_KEYS.passphrase) || '',
   });
+
+  function saveSyncConfig(config: SyncConfig) {
+    localStorage.setItem(SYNC_STORAGE_KEYS.serverUrl, config.serverUrl);
+    localStorage.setItem(SYNC_STORAGE_KEYS.apiToken, config.apiToken);
+    localStorage.setItem(SYNC_STORAGE_KEYS.churchKey, config.churchKey);
+    localStorage.setItem(SYNC_STORAGE_KEYS.passphrase, config.passphrase);
+  }
+
+  function openSyncDialog(mode: SyncDialogMode) {
+    setSyncMode(mode);
+    setSyncForm({
+      serverUrl: localStorage.getItem(SYNC_STORAGE_KEYS.serverUrl) || '',
+      apiToken: localStorage.getItem(SYNC_STORAGE_KEYS.apiToken) || '',
+      churchKey: localStorage.getItem(SYNC_STORAGE_KEYS.churchKey) || '',
+      passphrase: localStorage.getItem(SYNC_STORAGE_KEYS.passphrase) || '',
+    });
+  }
+
+  async function triggerSync(mode: 'upload' | 'download') {
+    const payload: SyncConfig = {
+      serverUrl: (localStorage.getItem(SYNC_STORAGE_KEYS.serverUrl) || '').trim(),
+      apiToken: (localStorage.getItem(SYNC_STORAGE_KEYS.apiToken) || '').trim(),
+      churchKey: (localStorage.getItem(SYNC_STORAGE_KEYS.churchKey) || '').trim(),
+      passphrase: localStorage.getItem(SYNC_STORAGE_KEYS.passphrase) || '',
+    };
+    if (!payload.serverUrl || !payload.churchKey || !payload.passphrase) {
+      openSyncDialog(mode);
+      return;
+    }
+    const result =
+      mode === 'upload'
+        ? await run('Backup uploaded to server.', () => window.faithflow.syncUploadToServer(payload))
+        : await run('Backup downloaded from server.', () => window.faithflow.syncDownloadFromServer(payload));
+    if (!result) {
+      openSyncDialog(mode);
+      return;
+    }
+    setSyncMode(null);
+  }
 
   async function run<T>(label: string, fn: () => Promise<T>) {
     setError('');
@@ -445,15 +497,16 @@ function App() {
 
   useEffect(() => {
     const unsubUpload = window.faithflow.onSyncUploadRequested(() => {
-      setSyncMode('upload');
+      void triggerSync('upload');
     });
     const unsubDownload = window.faithflow.onSyncDownloadRequested(() => {
-      setSyncMode('download');
+      void triggerSync('download');
     });
     return () => {
       unsubUpload();
       unsubDownload();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -878,7 +931,7 @@ function App() {
   async function submitSyncToServer(event: FormEvent) {
     event.preventDefault();
     if (!syncMode) return;
-    const payload = {
+    const payload: SyncConfig = {
       serverUrl: syncForm.serverUrl.trim(),
       apiToken: syncForm.apiToken.trim(),
       churchKey: syncForm.churchKey.trim(),
@@ -888,15 +941,13 @@ function App() {
       setError('Server URL, Church Key, and Passphrase are required.');
       return;
     }
-    localStorage.setItem('faithflow.sync.serverUrl', payload.serverUrl);
-    localStorage.setItem('faithflow.sync.churchKey', payload.churchKey);
+    saveSyncConfig(payload);
     const result =
       syncMode === 'upload'
         ? await run('Backup uploaded to server.', () => window.faithflow.syncUploadToServer(payload))
         : await run('Backup downloaded from server.', () => window.faithflow.syncDownloadFromServer(payload));
     if (!result) return;
     setSyncMode(null);
-    setSyncForm((prev) => ({ ...prev, apiToken: '', passphrase: '' }));
   }
 
   function printReport() {
@@ -1700,7 +1751,6 @@ function App() {
                   className="secondary"
                   onClick={() => {
                     setSyncMode(null);
-                    setSyncForm((p) => ({ ...p, apiToken: '', passphrase: '' }));
                   }}
                 >
                   Cancel

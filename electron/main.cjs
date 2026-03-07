@@ -1,5 +1,6 @@
 const path = require('node:path');
 const crypto = require('node:crypto');
+const zlib = require('node:zlib');
 const { app, BrowserWindow, dialog, ipcMain, Menu } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const { DataService } = require('./data-service.cjs');
@@ -413,20 +414,6 @@ function buildAppMenu() {
         ]
       : []),
     {
-      label: 'Edit',
-      submenu: [
-        { role: 'undo' },
-        { role: 'redo' },
-        { type: 'separator' },
-        { role: 'cut' },
-        { role: 'copy' },
-        { role: 'paste' },
-        { role: 'pasteAndMatchStyle' },
-        { role: 'delete' },
-        { role: 'selectAll' },
-      ],
-    },
-    {
       label: 'File',
       submenu: [
         {
@@ -451,6 +438,20 @@ function buildAppMenu() {
         { label: 'Logout', click: menuAction(() => performLogout()) },
         { type: 'separator' },
         ...(process.platform === 'darwin' ? [{ role: 'close' }] : [{ role: 'quit' }]),
+      ],
+    },
+    {
+      label: 'Edit',
+      submenu: [
+        { role: 'undo' },
+        { role: 'redo' },
+        { type: 'separator' },
+        { role: 'cut' },
+        { role: 'copy' },
+        { role: 'paste' },
+        { role: 'pasteAndMatchStyle' },
+        { role: 'delete' },
+        { role: 'selectAll' },
       ],
     },
     {
@@ -843,11 +844,13 @@ app.whenReady().then(() => {
   );
 
   function encryptPayload(payload, passphrase) {
+    const plain = Buffer.from(JSON.stringify(payload), 'utf8');
+    const compressed = zlib.gzipSync(plain);
     const salt = crypto.randomBytes(16);
     const iv = crypto.randomBytes(12);
     const key = crypto.pbkdf2Sync(String(passphrase), salt, 210000, 32, 'sha256');
     const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
-    const encrypted = Buffer.concat([cipher.update(JSON.stringify(payload), 'utf8'), cipher.final()]);
+    const encrypted = Buffer.concat([cipher.update(compressed), cipher.final()]);
     const tag = cipher.getAuthTag();
     return Buffer.from(
       JSON.stringify({
@@ -855,6 +858,7 @@ app.whenReady().then(() => {
         alg: 'aes-256-gcm',
         kdf: 'pbkdf2-sha256',
         i: 210000,
+        cmp: 'gzip',
         salt: salt.toString('base64'),
         iv: iv.toString('base64'),
         tag: tag.toString('base64'),
@@ -874,8 +878,10 @@ app.whenReady().then(() => {
     const key = crypto.pbkdf2Sync(String(passphrase), salt, iterations, 32, 'sha256');
     const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
     decipher.setAuthTag(tag);
-    const decrypted = Buffer.concat([decipher.update(data), decipher.final()]).toString('utf8');
-    return JSON.parse(decrypted);
+    const decrypted = Buffer.concat([decipher.update(data), decipher.final()]);
+    const uncompressed =
+      String(wrapper?.cmp || '').toLowerCase() === 'gzip' ? zlib.gunzipSync(decrypted) : decrypted;
+    return JSON.parse(uncompressed.toString('utf8'));
   }
 
   ipcMain.handle(
