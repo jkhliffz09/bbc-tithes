@@ -58,6 +58,8 @@ type DuplicateEntryDialog = {
   };
 };
 
+type SyncDialogMode = 'upload' | 'download' | null;
+
 const ROLE_OPTIONS: Role[] = ['Superadmin', 'Admin', 'Deacon', 'Accounting', 'Users'];
 
 function toISODate(d: Date): string {
@@ -250,6 +252,13 @@ function App() {
   const [pendingEntryAction, setPendingEntryAction] = useState<PendingEntryAction | null>(null);
   const [adminApproval, setAdminApproval] = useState({ adminUsername: '', adminPassword: '', adminNote: '' });
   const [duplicateDialog, setDuplicateDialog] = useState<DuplicateEntryDialog | null>(null);
+  const [syncMode, setSyncMode] = useState<SyncDialogMode>(null);
+  const [syncForm, setSyncForm] = useState({
+    serverUrl: localStorage.getItem('faithflow.sync.serverUrl') || '',
+    apiToken: '',
+    churchKey: localStorage.getItem('faithflow.sync.churchKey') || '',
+    passphrase: '',
+  });
 
   async function run<T>(label: string, fn: () => Promise<T>) {
     setError('');
@@ -432,6 +441,19 @@ function App() {
       const user = await run('', () => window.faithflow.currentUser());
       if (user) setAuthUser(user);
     })();
+  }, []);
+
+  useEffect(() => {
+    const unsubUpload = window.faithflow.onSyncUploadRequested(() => {
+      setSyncMode('upload');
+    });
+    const unsubDownload = window.faithflow.onSyncDownloadRequested(() => {
+      setSyncMode('download');
+    });
+    return () => {
+      unsubUpload();
+      unsubDownload();
+    };
   }, []);
 
   useEffect(() => {
@@ -851,6 +873,30 @@ function App() {
     const result = await run('', () => window.faithflow.exportReportPdf());
     if (!result || result.canceled) return;
     setToast(`Report PDF exported to ${result.path || 'selected path'}.`);
+  }
+
+  async function submitSyncToServer(event: FormEvent) {
+    event.preventDefault();
+    if (!syncMode) return;
+    const payload = {
+      serverUrl: syncForm.serverUrl.trim(),
+      apiToken: syncForm.apiToken.trim(),
+      churchKey: syncForm.churchKey.trim(),
+      passphrase: syncForm.passphrase,
+    };
+    if (!payload.serverUrl || !payload.churchKey || !payload.passphrase) {
+      setError('Server URL, Church Key, and Passphrase are required.');
+      return;
+    }
+    localStorage.setItem('faithflow.sync.serverUrl', payload.serverUrl);
+    localStorage.setItem('faithflow.sync.churchKey', payload.churchKey);
+    const result =
+      syncMode === 'upload'
+        ? await run('Backup uploaded to server.', () => window.faithflow.syncUploadToServer(payload))
+        : await run('Backup downloaded from server.', () => window.faithflow.syncDownloadFromServer(payload));
+    if (!result) return;
+    setSyncMode(null);
+    setSyncForm((prev) => ({ ...prev, apiToken: '', passphrase: '' }));
   }
 
   function printReport() {
@@ -1604,6 +1650,66 @@ function App() {
           </section>
         )}
       </main>
+      {syncMode && (
+        <div className="modal-backdrop" role="presentation">
+          <section className="modal-card">
+            <h3>{syncMode === 'upload' ? 'Upload to Server' : 'Download from Server'}</h3>
+            <p className="muted">
+              Data is encrypted locally before upload. Use the same Church Key and Passphrase for download.
+            </p>
+            <form className="form" onSubmit={submitSyncToServer}>
+              <label>
+                Server URL
+                <input
+                  placeholder="https://your-server.com"
+                  value={syncForm.serverUrl}
+                  onChange={(e) => setSyncForm((p) => ({ ...p, serverUrl: e.target.value }))}
+                  required
+                />
+              </label>
+              <label>
+                API Token (optional)
+                <input
+                  value={syncForm.apiToken}
+                  onChange={(e) => setSyncForm((p) => ({ ...p, apiToken: e.target.value }))}
+                />
+              </label>
+              <label>
+                Church Key
+                <input
+                  value={syncForm.churchKey}
+                  onChange={(e) => setSyncForm((p) => ({ ...p, churchKey: e.target.value }))}
+                  required
+                />
+              </label>
+              <label>
+                Passphrase
+                <input
+                  type="password"
+                  value={syncForm.passphrase}
+                  onChange={(e) => setSyncForm((p) => ({ ...p, passphrase: e.target.value }))}
+                  required
+                />
+              </label>
+              <div className="row-actions">
+                <button type="submit" disabled={busy}>
+                  {syncMode === 'upload' ? 'Upload' : 'Download'}
+                </button>
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() => {
+                    setSyncMode(null);
+                    setSyncForm((p) => ({ ...p, apiToken: '', passphrase: '' }));
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </section>
+        </div>
+      )}
       {duplicateDialog && (
         <div className="modal-backdrop" role="presentation">
           <section className="modal-card">

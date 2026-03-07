@@ -45,6 +45,8 @@ contextBridge.exposeInMainWorld('faithflow', {
   exportAppWorkbook: () => invoke('excel:exportAppWorkbook'),
   exportFullBackup: () => invoke('backup:exportFull'),
   importFullBackup: () => invoke('backup:importFull'),
+  syncUploadToServer: (payload) => invoke('sync:upload', payload),
+  syncDownloadFromServer: (payload) => invoke('sync:download', payload),
   onLoggedOut: (callback) => {
     const handler = () => callback();
     ipcRenderer.on('app:loggedOut', handler);
@@ -54,5 +56,15 @@ contextBridge.exposeInMainWorld('faithflow', {
     const handler = (_event, payload) => callback(payload);
     ipcRenderer.on('app:dataChanged', handler);
     return () => ipcRenderer.removeListener('app:dataChanged', handler);
+  },
+  onSyncUploadRequested: (callback) => {
+    const handler = () => callback();
+    ipcRenderer.on('sync:uploadRequested', handler);
+    return () => ipcRenderer.removeListener('sync:uploadRequested', handler);
+  },
+  onSyncDownloadRequested: (callback) => {
+    const handler = () => callback();
+    ipcRenderer.on('sync:downloadRequested', handler);
+    return () => ipcRenderer.removeListener('sync:downloadRequested', handler);
   },
 });

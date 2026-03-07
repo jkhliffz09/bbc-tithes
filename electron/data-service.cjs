@@ -1240,12 +1240,38 @@ class DataService {
 
   exportFullBackup(targetPath) {
     if (!targetPath) throw new Error('Backup path is required.');
+    const backup = this.buildFullBackupPayload();
 
+    fs.writeFileSync(targetPath, JSON.stringify(backup, null, 2), 'utf-8');
+
+    return {
+      success: true,
+      path: targetPath,
+      memberCount: backup.data.members.length,
+      entryCount: backup.data.entries.length,
+      userCount: backup.data.users.length,
+      approvalCount: backup.data.approvals.length,
+      generatedReportCount: backup.data.generatedReports.length,
+    };
+  }
+
+  importFullBackup(sourcePath) {
+    if (!sourcePath) throw new Error('Backup path is required.');
+    const raw = fs.readFileSync(sourcePath, 'utf-8');
+    const parsed = JSON.parse(raw);
+    return this.restoreFullBackupPayload(parsed);
+  }
+
+  buildFullBackupPayload() {
     const members = this.db
       .prepare(
         `SELECT
            id,
            member_code AS memberCode,
+           first_name AS firstName,
+           middle_name AS middleName,
+           last_name AS lastName,
+           suffix,
            full_name AS fullName,
            birthday,
            contact,
@@ -1308,8 +1334,8 @@ class DataService {
       )
       .all();
 
-    const backup = {
-      schemaVersion: 1,
+    return {
+      schemaVersion: 2,
       exportedAt: this.now(),
       source: {
         appName: 'FaithFlow - BBC Tithes and Offerings',
@@ -1322,25 +1348,9 @@ class DataService {
         generatedReports,
       },
     };
-
-    fs.writeFileSync(targetPath, JSON.stringify(backup, null, 2), 'utf-8');
-
-    return {
-      success: true,
-      path: targetPath,
-      memberCount: members.length,
-      entryCount: entries.length,
-      userCount: users.length,
-      approvalCount: approvals.length,
-      generatedReportCount: generatedReports.length,
-    };
   }
 
-  importFullBackup(sourcePath) {
-    if (!sourcePath) throw new Error('Backup path is required.');
-    const raw = fs.readFileSync(sourcePath, 'utf-8');
-    const parsed = JSON.parse(raw);
-
+  restoreFullBackupPayload(parsed) {
     if (!parsed?.data || !Array.isArray(parsed.data.members) || !Array.isArray(parsed.data.entries)) {
       throw new Error('Invalid backup file format.');
     }
@@ -1358,9 +1368,9 @@ class DataService {
 
       const insertMember = this.db.prepare(
         `INSERT INTO members
-        (id, member_code, full_name, birthday, contact, address, created_at, updated_at)
+        (id, member_code, first_name, middle_name, last_name, suffix, full_name, birthday, contact, address, created_at, updated_at)
         VALUES
-        (@id, @memberCode, @fullName, @birthday, @contact, @address, @createdAt, @updatedAt)`
+        (@id, @memberCode, @firstName, @middleName, @lastName, @suffix, @fullName, @birthday, @contact, @address, @createdAt, @updatedAt)`
       );
       const insertEntry = this.db.prepare(
         `INSERT INTO entries
@@ -1388,10 +1398,31 @@ class DataService {
       );
 
       for (const m of parsed.data.members) {
+        const firstName = String(m.firstName || '').trim();
+        const middleName = String(m.middleName || '').trim();
+        const lastName = String(m.lastName || '').trim();
+        const suffix = String(m.suffix || '').trim();
+        const legacyFullName = String(m.fullName || '').trim();
+        let resolvedFirst = firstName;
+        let resolvedMiddle = middleName;
+        let resolvedLast = lastName;
+        if ((!resolvedFirst || !resolvedLast) && legacyFullName) {
+          const parts = legacyFullName.split(/\s+/).filter(Boolean);
+          resolvedFirst = resolvedFirst || parts[0] || '';
+          resolvedLast = resolvedLast || (parts.length > 1 ? parts[parts.length - 1] : '');
+          if (!resolvedMiddle && parts.length > 2) {
+            resolvedMiddle = parts.slice(1, -1).join(' ');
+          }
+        }
+        const fullName = [resolvedFirst, resolvedMiddle, resolvedLast, suffix].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
         insertMember.run({
           id: Number(m.id),
           memberCode: String(m.memberCode || '').trim() || null,
-          fullName: String(m.fullName || '').trim(),
+          firstName: resolvedFirst || null,
+          middleName: resolvedMiddle || null,
+          lastName: resolvedLast || null,
+          suffix: suffix || null,
+          fullName,
           birthday: toDateString(m.birthday) || null,
           contact: String(m.contact || '').trim() || null,
           address: String(m.address || '').trim() || null,

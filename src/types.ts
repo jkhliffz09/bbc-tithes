@@ -155,8 +155,12 @@ declare global {
       exportAppWorkbook: () => Promise<ImportExportResult>;
       exportFullBackup: () => Promise<ImportExportResult>;
       importFullBackup: () => Promise<ImportExportResult>;
+      syncUploadToServer: (payload: { serverUrl: string; apiToken?: string; churchKey: string; passphrase: string }) => Promise<{ success: true }>;
+      syncDownloadFromServer: (payload: { serverUrl: string; apiToken?: string; churchKey: string; passphrase: string }) => Promise<ImportExportResult>;
       onLoggedOut: (callback: () => void) => () => void;
       onDataChanged: (callback: (payload?: { message?: string }) => void) => () => void;
+      onSyncUploadRequested: (callback: () => void) => () => void;
+      onSyncDownloadRequested: (callback: () => void) => () => void;
     };
   }
 }

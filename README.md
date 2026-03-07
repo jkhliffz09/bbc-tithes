@@ -1,35 +1,8 @@
 # FaithFlow - BBC Tithes and Offerings
 
-Desktop app to record church members' tithes and offerings (Sunday/Wednesday), with role-based access, Excel import/export, and printable reports.
+Electron desktop app for recording members, giving entries, and reports with role-based access and installer auto-update support.
 
-## Features
-
-- Login with role-based access: Admin, Deacons, Accounting, Users
-- Add, edit, delete members (based on role)
-- Member Code auto-increments (editable)
-- Member birthday field (optional)
-- Record giving entries per member by date and service type
-- Service type auto-populated from selected date (Sunday/Wednesday)
-- Default entry date uses nearest past Sunday or Wednesday
-- Member search in Giving Entries form for large member lists
-- Import members from BBC members workbook template
-- Import/export full app data to `.xlsx` (Members + Entries sheets)
-- Export/Import **Full Backup** (`.faithflow.json`) for cross-device migration and full sync (Mac/Windows)
-- Generate report by date range
-- Print report
-- Export generated report to Excel
-- Deacons can edit entries only with Admin username/password approval per edit
-
-## Default Users
-
-- `admin` / `admin123`
-- `deacon` / `deacon123`
-- `accounting` / `accounting123`
-- `user` / `user123`
-
-Change these passwords after first login in production use.
-
-## Development
+## Run App (Development)
 
 ```bash
 npm install
@@ -39,33 +12,69 @@ npm run dev
 ## Build Installers
 
 ```bash
-npm run dist:mac   # builds .dmg
-npm run dist:win   # builds .exe (NSIS)
-npm run dist       # builds all configured targets for current host
+npm run dist:mac   # DMG + ZIP
+npm run dist:win   # Windows NSIS EXE
 ```
 
-Build outputs are written to `release/`.
+Artifacts are written to `release/`.
 
-## Auto Update + GitHub Releases
+## In-App Update (GitHub Releases)
 
-- In-app updater is enabled via `electron-updater` and GitHub Releases.
-- Configure your repo in `package.json` (`repository` and `build.publish`).
-- CI workflow is included at `.github/workflows/release.yml`.
-- Create and push a semantic tag (for example `v1.0.3`) to trigger release builds.
-
-### Bump + Tag + Push
+1. Ensure `package.json` has correct `repository` and `build.publish` GitHub owner/repo.
+2. Bump and push a version tag:
 
 ```bash
 npm run release:patch   # or release:minor / release:major
 ```
 
-This bumps `package.json`, creates a git tag, and pushes commit + tags.
+3. Publish release artifacts (`latest.yml`, `latest-mac.yml`, installers/zips) on GitHub Releases.
 
-## Branding
+## Sync Server (Upload/Download from File Menu)
 
-Current placeholder logo is at:
+The app can upload/download encrypted full backups to a simple server.
 
-- `public/logo-placeholder.svg`
-- `build/icon.png`
+### 1. Configure server env
 
-Replace these with your official BBC logo files before final release for branded installer/app icons.
+```bash
+cp server/.env.example server/.env
+```
+
+Environment variables:
+
+- `SYNC_HOST` default `0.0.0.0`
+- `SYNC_PORT` default `8787`
+- `SYNC_API_TOKEN` optional bearer token (recommended)
+- `SYNC_DATA_DIR` default `./server/data`
+- `SYNC_MAX_BODY_BYTES` default `20971520` (20MB)
+
+### 2. Start sync server
+
+```bash
+npm run server:sync
+```
+
+Health check:
+
+```bash
+curl http://localhost:8787/health
+```
+
+### 3. Use in the app
+
+In app menu:
+
+- `File -> Upload to Server`
+- `File -> Download from Server`
+
+Fields mapping:
+
+- `Server URL`: for example `http://YOUR_SERVER_IP:8787`
+- `API Token`: must match `SYNC_API_TOKEN` if set
+- `Church Key`: unique key for your church dataset (same key for upload/download)
+- `Passphrase`: encryption passphrase (must be exactly the same for upload/download)
+
+Notes:
+
+- Data is encrypted client-side before upload.
+- Server stores encrypted payload only.
+- Wrong passphrase on download will fail decryption.

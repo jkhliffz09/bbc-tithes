@@ -1,4 +1,5 @@
 const path = require('node:path');
+const crypto = require('node:crypto');
 const { app, BrowserWindow, dialog, ipcMain, Menu } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const { DataService } = require('./data-service.cjs');
@@ -385,6 +386,12 @@ function menuAction(fn) {
   };
 }
 
+function notifyRenderer(channel) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send(channel);
+  }
+}
+
 function buildAppMenu() {
   const template = [
     ...(process.platform === 'darwin'
@@ -423,6 +430,9 @@ function buildAppMenu() {
             { label: 'Full Backup', click: menuAction(exportFullBackupFlow) },
           ],
         },
+        { type: 'separator' },
+        { label: 'Upload to Server', click: () => notifyRenderer('sync:uploadRequested') },
+        { label: 'Download from Server', click: () => notifyRenderer('sync:downloadRequested') },
         { type: 'separator' },
         { label: 'Logout', click: menuAction(() => performLogout()) },
         { type: 'separator' },
@@ -816,6 +826,111 @@ app.whenReady().then(() => {
   ipcMain.handle(
     'backup:importFull',
     withErrorHandling(async () => ({ ok: true, data: await importFullBackupFlow() }))
+  );
+
+  function encryptPayload(payload, passphrase) {
+    const salt = crypto.randomBytes(16);
+    const iv = crypto.randomBytes(12);
+    const key = crypto.pbkdf2Sync(String(passphrase), salt, 210000, 32, 'sha256');
+    const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+    const encrypted = Buffer.concat([cipher.update(JSON.stringify(payload), 'utf8'), cipher.final()]);
+    const tag = cipher.getAuthTag();
+    return Buffer.from(
+      JSON.stringify({
+        v: 1,
+        alg: 'aes-256-gcm',
+        kdf: 'pbkdf2-sha256',
+        i: 210000,
+        salt: salt.toString('base64'),
+        iv: iv.toString('base64'),
+        tag: tag.toString('base64'),
+        data: encrypted.toString('base64'),
+      }),
+      'utf8'
+    ).toString('base64');
+  }
+
+  function decryptPayload(blob, passphrase) {
+    const wrapper = JSON.parse(Buffer.from(String(blob), 'base64').toString('utf8'));
+    const salt = Buffer.from(String(wrapper.salt || ''), 'base64');
+    const iv = Buffer.from(String(wrapper.iv || ''), 'base64');
+    const tag = Buffer.from(String(wrapper.tag || ''), 'base64');
+    const data = Buffer.from(String(wrapper.data || ''), 'base64');
+    const iterations = Number(wrapper.i || 210000);
+    const key = crypto.pbkdf2Sync(String(passphrase), salt, iterations, 32, 'sha256');
+    const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
+    decipher.setAuthTag(tag);
+    const decrypted = Buffer.concat([decipher.update(data), decipher.final()]).toString('utf8');
+    return JSON.parse(decrypted);
+  }
+
+  ipcMain.handle(
+    'sync:upload',
+    withErrorHandling(async (_event, payload) => {
+      requirePermission('backup.export');
+      const serverUrl = String(payload?.serverUrl || '').trim().replace(/\/+$/, '');
+      const apiToken = String(payload?.apiToken || '').trim();
+      const churchKey = String(payload?.churchKey || '').trim();
+      const passphrase = String(payload?.passphrase || '');
+      if (!serverUrl || !churchKey || !passphrase) {
+        throw new Error('Server URL, Church Key, and Passphrase are required.');
+      }
+      const backup = dataService.buildFullBackupPayload();
+      const encryptedPayload = encryptPayload(backup, passphrase);
+      const response = await fetch(`${serverUrl}/faithflow/sync/upload`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          ...(apiToken ? { authorization: `Bearer ${apiToken}` } : {}),
+        },
+        body: JSON.stringify({
+          churchKey,
+          uploadedAt: new Date().toISOString(),
+          appVersion: app.getVersion(),
+          platform: process.platform,
+          payload: encryptedPayload,
+        }),
+      });
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(`Upload failed (${response.status}): ${text || 'Unknown error'}`);
+      }
+      return { success: true };
+    })
+  );
+
+  ipcMain.handle(
+    'sync:download',
+    withErrorHandling(async (_event, payload) => {
+      requirePermission('backup.import');
+      const serverUrl = String(payload?.serverUrl || '').trim().replace(/\/+$/, '');
+      const apiToken = String(payload?.apiToken || '').trim();
+      const churchKey = String(payload?.churchKey || '').trim();
+      const passphrase = String(payload?.passphrase || '');
+      if (!serverUrl || !churchKey || !passphrase) {
+        throw new Error('Server URL, Church Key, and Passphrase are required.');
+      }
+      const response = await fetch(
+        `${serverUrl}/faithflow/sync/download?churchKey=${encodeURIComponent(churchKey)}`,
+        {
+          method: 'GET',
+          headers: {
+            ...(apiToken ? { authorization: `Bearer ${apiToken}` } : {}),
+          },
+        }
+      );
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(`Download failed (${response.status}): ${text || 'Unknown error'}`);
+      }
+      const body = await response.json();
+      const backupPayload = decryptPayload(body?.payload, passphrase);
+      const result = dataService.restoreFullBackupPayload(backupPayload);
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('app:dataChanged', { message: 'Downloaded from server and restored.' });
+      }
+      return result;
+    })
   );
 
   createWindow();
