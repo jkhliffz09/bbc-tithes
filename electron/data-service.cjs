@@ -114,9 +114,18 @@ class DataService {
         created_at TEXT NOT NULL
       );
 
+      CREATE TABLE IF NOT EXISTS generated_reports (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        date_from TEXT NOT NULL,
+        date_to TEXT NOT NULL,
+        report_json TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+
       CREATE INDEX IF NOT EXISTS idx_entries_service_date ON entries(service_date);
       CREATE INDEX IF NOT EXISTS idx_entries_member_id ON entries(member_id);
       CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
+      CREATE INDEX IF NOT EXISTS idx_generated_reports_dates ON generated_reports(date_from, date_to);
     `);
 
     if (!this.hasColumn('members', 'birthday')) {
@@ -860,6 +869,104 @@ class DataService {
     };
   }
 
+  saveGeneratedReport(reportPayload) {
+    const reportJson = JSON.stringify(reportPayload);
+    const result = this.db
+      .prepare(
+        `INSERT INTO generated_reports (date_from, date_to, report_json, created_at)
+         VALUES (@dateFrom, @dateTo, @reportJson, @createdAt)`
+      )
+      .run({
+        dateFrom: String(reportPayload.dateFrom),
+        dateTo: String(reportPayload.dateTo),
+        reportJson,
+        createdAt: this.now(),
+      });
+
+    return this.getGeneratedReportById(result.lastInsertRowid);
+  }
+
+  findGeneratedReportExact(dateFrom, dateTo) {
+    const row = this.db
+      .prepare(
+        `SELECT id, date_from AS dateFrom, date_to AS dateTo, report_json AS reportJson, created_at AS createdAt
+         FROM generated_reports
+         WHERE date_from = @dateFrom AND date_to = @dateTo
+         ORDER BY id DESC
+         LIMIT 1`
+      )
+      .get({ dateFrom: String(dateFrom), dateTo: String(dateTo) });
+
+    if (!row) return null;
+    let report = null;
+    try {
+      report = JSON.parse(String(row.reportJson || '{}'));
+    } catch {
+      report = null;
+    }
+    return {
+      id: row.id,
+      dateFrom: row.dateFrom,
+      dateTo: row.dateTo,
+      createdAt: row.createdAt,
+      report,
+    };
+  }
+
+  getGeneratedReportById(id) {
+    const row = this.db
+      .prepare(
+        `SELECT id, date_from AS dateFrom, date_to AS dateTo, report_json AS reportJson, created_at AS createdAt
+         FROM generated_reports
+         WHERE id = ?`
+      )
+      .get(Number(id));
+    if (!row) throw new Error('Generated report not found.');
+    let report = null;
+    try {
+      report = JSON.parse(String(row.reportJson || '{}'));
+    } catch {
+      throw new Error('Generated report payload is invalid.');
+    }
+    return {
+      id: row.id,
+      dateFrom: row.dateFrom,
+      dateTo: row.dateTo,
+      createdAt: row.createdAt,
+      report,
+    };
+  }
+
+  listGeneratedReports(filters = {}) {
+    const dateFrom = toDateString(filters.dateFrom) || '1900-01-01';
+    const dateTo = toDateString(filters.dateTo) || '2999-12-31';
+    return this.db
+      .prepare(
+        `SELECT
+           id,
+           date_from AS dateFrom,
+           date_to AS dateTo,
+           created_at AS createdAt
+         FROM generated_reports
+         WHERE date_from >= @dateFrom AND date_to <= @dateTo
+         ORDER BY created_at DESC, id DESC`
+      )
+      .all({ dateFrom, dateTo });
+  }
+
+  exportGeneratedReportWorkbook(targetPath, generatedReportId) {
+    const item = this.getGeneratedReportById(generatedReportId);
+    return this.exportReportWorkbook(targetPath, {
+      dateFrom: item.report?.dateFrom || item.dateFrom,
+      dateTo: item.report?.dateTo || item.dateTo,
+      adminName: item.report?.signatory?.adminName || '',
+      accountingName: item.report?.signatory?.accountingName || '',
+      deacon1Name: item.report?.signatory?.deacon1Name || '',
+      deacon2Name: item.report?.signatory?.deacon2Name || '',
+      actualMoneyOnHand: item.report?.summary?.actualMoneyOnHand || 0,
+    });
+  }
+
   exportReportWorkbook(targetPath, filters = {}) {
     if (!targetPath) throw new Error('Export path is required.');
     const report = this.getReport(filters);
@@ -1021,6 +1128,18 @@ class DataService {
          ORDER BY id ASC`
       )
       .all();
+    const generatedReports = this.db
+      .prepare(
+        `SELECT
+           id,
+           date_from AS dateFrom,
+           date_to AS dateTo,
+           report_json AS reportJson,
+           created_at AS createdAt
+         FROM generated_reports
+         ORDER BY id ASC`
+      )
+      .all();
 
     const backup = {
       schemaVersion: 1,
@@ -1033,6 +1152,7 @@ class DataService {
         entries,
         users,
         approvals,
+        generatedReports,
       },
     };
 
@@ -1045,6 +1165,7 @@ class DataService {
       entryCount: entries.length,
       userCount: users.length,
       approvalCount: approvals.length,
+      generatedReportCount: generatedReports.length,
     };
   }
 
@@ -1059,9 +1180,11 @@ class DataService {
 
     const users = Array.isArray(parsed.data.users) ? parsed.data.users : [];
     const approvals = Array.isArray(parsed.data.approvals) ? parsed.data.approvals : [];
+    const generatedReports = Array.isArray(parsed.data.generatedReports) ? parsed.data.generatedReports : [];
 
     const tx = this.db.transaction(() => {
       this.db.prepare('DELETE FROM admin_approvals').run();
+      this.db.prepare('DELETE FROM generated_reports').run();
       this.db.prepare('DELETE FROM entries').run();
       this.db.prepare('DELETE FROM members').run();
       this.db.prepare('DELETE FROM users').run();
@@ -1089,6 +1212,12 @@ class DataService {
         (id, actor_user_id, actor_role, action, target_entry_id, admin_user_id, admin_username, note, created_at)
         VALUES
         (@id, @actorUserId, @actorRole, @action, @targetEntryId, @adminUserId, @adminUsername, @note, @createdAt)`
+      );
+      const insertGeneratedReport = this.db.prepare(
+        `INSERT INTO generated_reports
+        (id, date_from, date_to, report_json, created_at)
+        VALUES
+        (@id, @dateFrom, @dateTo, @reportJson, @createdAt)`
       );
 
       for (const m of parsed.data.members) {
@@ -1149,6 +1278,16 @@ class DataService {
           adminUsername: String(a.adminUsername || ''),
           note: String(a.note || ''),
           createdAt: String(a.createdAt || this.now()),
+        });
+      }
+
+      for (const g of generatedReports) {
+        insertGeneratedReport.run({
+          id: Number(g.id),
+          dateFrom: toDateString(g.dateFrom),
+          dateTo: toDateString(g.dateTo),
+          reportJson: String(g.reportJson || '{}'),
+          createdAt: String(g.createdAt || this.now()),
         });
       }
     });

@@ -31,7 +31,10 @@ contextBridge.exposeInMainWorld('faithflow', {
   deleteEntry: (payload) => invoke('entries:delete', payload),
 
   generateReport: (filters) => invoke('reports:generate', filters),
+  listGeneratedReports: (filters) => invoke('reports:listGenerated', filters),
+  getGeneratedReport: (id) => invoke('reports:getGenerated', id),
   exportReportExcel: (filters) => invoke('reports:exportExcel', filters),
+  exportGeneratedReportExcel: (id) => invoke('reports:exportGeneratedExcel', id),
 
   importMembersTemplate: () => invoke('excel:importMembersTemplate'),
   importAppWorkbook: () => invoke('excel:importAppWorkbook'),

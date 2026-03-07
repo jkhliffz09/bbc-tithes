@@ -572,28 +572,66 @@ app.whenReady().then(() => {
     withErrorHandling((_event, filters) => {
       requirePermission('reports.generate');
       const role = getRole();
+      let payload = null;
       if (role === 'Deacons') {
         const selectedDate = toISODate(filters?.dateFrom || filters?.dateTo) || localTodayISO();
-        return {
-          ok: true,
-          data: dataService.getReport({
-            dateFrom: selectedDate,
-            dateTo: selectedDate,
-            actualMoneyOnHand: Number(filters?.actualMoneyOnHand || 0),
-          }),
-        };
-      }
-
-      return {
-        ok: true,
-        data: dataService.getReport({
+        payload = dataService.getReport({
+          dateFrom: selectedDate,
+          dateTo: selectedDate,
+          actualMoneyOnHand: Number(filters?.actualMoneyOnHand || 0),
+        });
+      } else {
+        payload = dataService.getReport({
           dateFrom: filters?.dateFrom,
           dateTo: filters?.dateTo,
           adminName: String(filters?.adminName || '').trim(),
           accountingName: String(filters?.accountingName || '').trim(),
           actualMoneyOnHand: Number(filters?.actualMoneyOnHand || 0),
-        }),
+        });
+      }
+
+      const existing = dataService.findGeneratedReportExact(payload.dateFrom, payload.dateTo);
+      if (existing && !filters?.forceNew) {
+        return {
+          ok: true,
+          data: {
+            status: 'exists',
+            generatedId: existing.id,
+            report: existing.report,
+          },
+        };
+      }
+
+      const saved = dataService.saveGeneratedReport(payload);
+      return {
+        ok: true,
+        data: {
+          status: 'saved',
+          generatedId: saved.id,
+          report: payload,
+        },
       };
+    })
+  );
+
+  ipcMain.handle(
+    'reports:listGenerated',
+    withErrorHandling((_event, filters) => {
+      requirePermission('reports.generate');
+      const role = getRole();
+      if (role === 'Deacons') {
+        const selectedDate = toISODate(filters?.dateFrom || filters?.dateTo) || localTodayISO();
+        return { ok: true, data: dataService.listGeneratedReports({ dateFrom: selectedDate, dateTo: selectedDate }) };
+      }
+      return { ok: true, data: dataService.listGeneratedReports(filters) };
+    })
+  );
+
+  ipcMain.handle(
+    'reports:getGenerated',
+    withErrorHandling((_event, id) => {
+      requirePermission('reports.generate');
+      return { ok: true, data: dataService.getGeneratedReportById(id) };
     })
   );
 
@@ -634,6 +672,22 @@ app.whenReady().then(() => {
           actualMoneyOnHand: Number(filters?.actualMoneyOnHand || 0),
         }),
       };
+    })
+  );
+
+  ipcMain.handle(
+    'reports:exportGeneratedExcel',
+    withErrorHandling(async (_event, id) => {
+      requirePermission('reports.export');
+      const saved = await dialog.showSaveDialog({
+        title: 'Export Generated Report Excel',
+        defaultPath: 'faithflow-generated-report.xlsx',
+        filters: [{ name: 'Excel Workbook', extensions: ['xlsx'] }],
+      });
+      if (saved.canceled || !saved.filePath) {
+        return { ok: true, data: { canceled: true } };
+      }
+      return { ok: true, data: dataService.exportGeneratedReportWorkbook(saved.filePath, id) };
     })
   );
 

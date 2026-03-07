@@ -76,6 +76,19 @@ export type ReportPayload = {
   summary: ReportSummary;
 };
 
+export type GeneratedReportItem = {
+  id: number;
+  dateFrom: string;
+  dateTo: string;
+  createdAt: string;
+};
+
+export type GenerateReportResult = {
+  status: 'saved' | 'exists';
+  generatedId: number;
+  report: ReportPayload;
+};
+
 export type ImportExportResult = {
   canceled?: boolean;
   success?: boolean;
@@ -124,8 +137,11 @@ declare global {
       updateEntry: (payload: Partial<Entry> & { id: number; adminUsername?: string; adminPassword?: string; adminNote?: string }) => Promise<Entry>;
       deleteEntry: (payload: { id: number; adminUsername?: string; adminPassword?: string; adminNote?: string } | number) => Promise<{ success: true }>;
 
-      generateReport: (filters: { dateFrom: string; dateTo: string; adminName?: string; accountingName?: string; deacon1Name?: string; deacon2Name?: string; actualMoneyOnHand?: number }) => Promise<ReportPayload>;
+      generateReport: (filters: { dateFrom: string; dateTo: string; adminName?: string; accountingName?: string; deacon1Name?: string; deacon2Name?: string; actualMoneyOnHand?: number; forceNew?: boolean }) => Promise<GenerateReportResult>;
+      listGeneratedReports: (filters: { dateFrom: string; dateTo: string }) => Promise<GeneratedReportItem[]>;
+      getGeneratedReport: (id: number) => Promise<{ id: number; dateFrom: string; dateTo: string; createdAt: string; report: ReportPayload }>;
       exportReportExcel: (filters: { dateFrom: string; dateTo: string; adminName?: string; accountingName?: string; deacon1Name?: string; deacon2Name?: string; actualMoneyOnHand?: number }) => Promise<ImportExportResult>;
+      exportGeneratedReportExcel: (id: number) => Promise<ImportExportResult>;
       importMembersTemplate: () => Promise<ImportExportResult>;
       importAppWorkbook: () => Promise<ImportExportResult>;
       exportAppWorkbook: () => Promise<ImportExportResult>;

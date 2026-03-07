@@ -138,6 +138,8 @@ textarea {
   border: 1px solid var(--border);
   border-radius: 12px;
   padding: 14px;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .panel.single {
@@ -172,7 +174,7 @@ textarea {
 
 .grid-inline {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
 }
 
@@ -317,7 +319,9 @@ tfoot th {
 .signatory-line span {
   display: block;
   border-top: 1px solid #2b3a4c;
-  padding-top: 6px;
+  padding-top: 14px;
+  margin-top: 22px;
+  min-height: 44px;
   font-weight: 600;
 }
 

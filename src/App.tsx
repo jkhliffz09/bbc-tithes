@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { FormEvent } from 'react';
 import './App.css';
-import type { Entry, Member, ReportPayload, Role, ServiceType, User } from './types';
+import type { Entry, GeneratedReportItem, ReportPayload, Member, Role, ServiceType, User } from './types';
 
 type Tab = 'members' | 'entries' | 'reports' | 'users';
 
@@ -191,6 +191,19 @@ function App() {
   });
   const [reportAudit, setReportAudit] = useState({ actualMoneyOnHand: '0' });
   const [report, setReport] = useState<ReportPayload | null>(null);
+  const [generatedReports, setGeneratedReports] = useState<GeneratedReportItem[]>([]);
+  const [generatedConflict, setGeneratedConflict] = useState<{
+    generatedId: number;
+    filters: {
+      dateFrom: string;
+      dateTo: string;
+      adminName?: string;
+      accountingName?: string;
+      deacon1Name?: string;
+      deacon2Name?: string;
+      actualMoneyOnHand?: number;
+    };
+  } | null>(null);
   const [pendingEntryAction, setPendingEntryAction] = useState<PendingEntryAction | null>(null);
   const [adminApproval, setAdminApproval] = useState({ adminUsername: '', adminPassword: '', adminNote: '' });
 
@@ -286,8 +299,46 @@ function App() {
             accountingName: reportSignatory.accountingName,
             actualMoneyOnHand: amount(reportAudit.actualMoneyOnHand),
           };
-    const payload = await run('', () => window.faithflow.generateReport(filters));
-    if (payload) setReport(payload);
+    const result = await run('', () => window.faithflow.generateReport(filters));
+    if (!result) return;
+    if (result.status === 'exists') {
+      setGeneratedConflict({ generatedId: result.generatedId, filters });
+      return;
+    }
+    setGeneratedConflict(null);
+    setReport(result.report);
+    await loadGeneratedReports();
+  }
+
+  async function loadGeneratedReports() {
+    if (!can(authUser?.role || null, 'reports.generate')) return;
+    const role = normalizeRole(authUser?.role);
+    const filters =
+      role === 'Deacons'
+        ? { dateFrom: reportRange.dateFrom, dateTo: reportRange.dateFrom }
+        : { dateFrom: reportRange.dateFrom, dateTo: reportRange.dateTo };
+    const data = await run('', () => window.faithflow.listGeneratedReports(filters));
+    if (data) setGeneratedReports(data);
+  }
+
+  async function openGeneratedReport(id: number) {
+    const data = await run('', () => window.faithflow.getGeneratedReport(id));
+    if (!data) return;
+    setReport(data.report);
+    setToast('Loaded generated report.');
+  }
+
+  async function exportGeneratedReport(id: number) {
+    const result = await run('', () => window.faithflow.exportGeneratedReportExcel(id));
+    if (!result || result.canceled) return;
+    setToast(`Generated report exported to ${result.path || 'selected path'}.`);
+  }
+
+  async function printGeneratedReport(id: number) {
+    const data = await run('', () => window.faithflow.getGeneratedReport(id));
+    if (!data) return;
+    setReport(data.report);
+    setTimeout(() => window.print(), 120);
   }
 
   async function seedNextMemberCode() {
@@ -326,7 +377,7 @@ function App() {
       void loadEntries(selectedDate);
       void loadUsers();
       void loadDeacons();
-      void generateReport();
+      void loadGeneratedReports();
       setToast(payload?.message || 'Data imported and reloaded.');
     });
     return () => unsubscribe();
@@ -338,14 +389,20 @@ function App() {
     const role = normalizeRole(authUser.role);
     void loadMembers('');
     void loadEntries(initialDate);
-    if (role !== 'Deacons') {
-      void generateReport();
-    }
     void seedNextMemberCode();
     void loadUsers();
     void loadDeacons();
+    if (role !== 'Deacons') {
+      void loadGeneratedReports();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authUser?.id]);
+
+  useEffect(() => {
+    if (!authUser) return;
+    void loadGeneratedReports();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reportRange.dateFrom, reportRange.dateTo, authUser?.id]);
 
   useEffect(() => {
     if (deacons.length < 2) return;
@@ -1055,6 +1112,7 @@ function App() {
                     </label>
                   </>
                 )}
+                {isDeaconRole && <span className="muted">Deacons: single-day report only.</span>}
                 {isDeaconRole ? (
                   <>
                     <label>
@@ -1223,6 +1281,41 @@ function App() {
                 </div>
               </div>
             )}
+
+            <h3>Generated Reports</h3>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Generated At</th>
+                    <th>Date From</th>
+                    <th>Date To</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {generatedReports.map((g) => (
+                    <tr key={g.id}>
+                      <td>{g.createdAt}</td>
+                      <td>{g.dateFrom}</td>
+                      <td>{g.dateTo}</td>
+                      <td>
+                        <div className="inline-actions">
+                          <button type="button" className="tiny" onClick={() => openGeneratedReport(g.id)}>Open</button>
+                          <button type="button" className="tiny secondary" onClick={() => exportGeneratedReport(g.id)}>Download</button>
+                          <button type="button" className="tiny secondary" onClick={() => printGeneratedReport(g.id)}>Print</button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                  {generatedReports.length === 0 && (
+                    <tr>
+                      <td colSpan={4} className="muted">No generated reports for the selected date filter.</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
           </section>
         )}
 
@@ -1360,6 +1453,44 @@ function App() {
                 </button>
               </div>
             </form>
+          </section>
+        </div>
+      )}
+      {generatedConflict && (
+        <div className="modal-backdrop" role="presentation">
+          <section className="modal-card">
+            <h3>Report Already Generated</h3>
+            <p className="muted">A generated report already exists for this selected day/range.</p>
+            <div className="row-actions">
+              <button
+                type="button"
+                onClick={() => {
+                  void openGeneratedReport(generatedConflict.generatedId);
+                  setGeneratedConflict(null);
+                }}
+              >
+                Go to Generated Report
+              </button>
+              <button
+                type="button"
+                className="secondary"
+                onClick={async () => {
+                  const result = await run('', () =>
+                    window.faithflow.generateReport({ ...generatedConflict.filters, forceNew: true })
+                  );
+                  if (result?.report) {
+                    setReport(result.report);
+                    await loadGeneratedReports();
+                  }
+                  setGeneratedConflict(null);
+                }}
+              >
+                Generate New Report
+              </button>
+              <button type="button" className="secondary" onClick={() => setGeneratedConflict(null)}>
+                Cancel
+              </button>
+            </div>
           </section>
         </div>
       )}
