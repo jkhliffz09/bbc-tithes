@@ -764,6 +764,52 @@ class DataService {
     return this.getEntryById(id);
   }
 
+  fillEntryEmptyFields(payload) {
+    const id = Number(payload.id);
+    if (!id) throw new Error('Entry ID is required.');
+    const existing = this.getEntryById(id);
+    if (!existing) throw new Error('Entry not found.');
+
+    const incomingTithes = valueToNumber(payload.tithes);
+    const incomingFaithPromise = valueToNumber(payload.faithPromise);
+    const incomingThanksgiving = valueToNumber(payload.thanksgiving);
+
+    const tithes = valueToNumber(existing.tithes) > 0 ? valueToNumber(existing.tithes) : incomingTithes;
+    const faithPromise = valueToNumber(existing.faithPromise) > 0 ? valueToNumber(existing.faithPromise) : incomingFaithPromise;
+    const thanksgiving = valueToNumber(existing.thanksgiving) > 0 ? valueToNumber(existing.thanksgiving) : incomingThanksgiving;
+
+    const incomingNotes = String(payload.notes || '').trim();
+    const existingNotes = String(existing.notes || '').trim();
+    const notes = incomingNotes || existingNotes || null;
+
+    this.db
+      .prepare(
+        `UPDATE entries
+         SET assigned_deacon_1_user_id = @assignedDeacon1UserId,
+             assigned_deacon_2_user_id = @assignedDeacon2UserId,
+             service_type = @serviceType,
+             tithes = @tithes,
+             faith_promise = @faithPromise,
+             thanksgiving = @thanksgiving,
+             notes = @notes,
+             updated_at = @updatedAt
+         WHERE id = @id`
+      )
+      .run({
+        id,
+        assignedDeacon1UserId: Number(payload.assignedDeacon1UserId || existing.assignedDeacon1UserId || 0),
+        assignedDeacon2UserId: Number(payload.assignedDeacon2UserId || existing.assignedDeacon2UserId || 0),
+        serviceType: String(payload.serviceType || existing.serviceType || 'Sunday'),
+        tithes,
+        faithPromise,
+        thanksgiving,
+        notes,
+        updatedAt: this.now(),
+      });
+
+    return this.getEntryById(id);
+  }
+
   deleteEntry(id) {
     const entryId = Number(id);
     if (!entryId) throw new Error('Entry ID is required.');

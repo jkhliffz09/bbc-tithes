@@ -554,6 +554,14 @@ app.whenReady().then(() => {
   );
 
   ipcMain.handle(
+    'entries:fillEmpty',
+    withErrorHandling((_event, payload) => {
+      requirePermission('entries.create');
+      return { ok: true, data: dataService.fillEntryEmptyFields(payload) };
+    })
+  );
+
+  ipcMain.handle(
     'entries:delete',
     withErrorHandling((_event, payload) => {
       requireAuth();
@@ -610,6 +618,35 @@ app.whenReady().then(() => {
           generatedId: saved.id,
           report: payload,
         },
+      };
+    })
+  );
+
+  ipcMain.handle(
+    'reports:preview',
+    withErrorHandling((_event, filters) => {
+      requirePermission('reports.generate');
+      const role = getRole();
+      if (role === 'Deacons') {
+        const selectedDate = toISODate(filters?.dateFrom || filters?.dateTo) || localTodayISO();
+        return {
+          ok: true,
+          data: dataService.getReport({
+            dateFrom: selectedDate,
+            dateTo: selectedDate,
+            actualMoneyOnHand: 0,
+          }),
+        };
+      }
+      return {
+        ok: true,
+        data: dataService.getReport({
+          dateFrom: filters?.dateFrom,
+          dateTo: filters?.dateTo,
+          adminName: String(filters?.adminName || '').trim(),
+          accountingName: String(filters?.accountingName || '').trim(),
+          actualMoneyOnHand: 0,
+        }),
       };
     })
   );

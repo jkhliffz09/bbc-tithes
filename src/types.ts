@@ -135,9 +135,11 @@ declare global {
       listEntries: (filters: { month?: string; date?: string; memberId?: number }) => Promise<Entry[]>;
       createEntry: (payload: Partial<Entry>) => Promise<Entry>;
       updateEntry: (payload: Partial<Entry> & { id: number; adminUsername?: string; adminPassword?: string; adminNote?: string }) => Promise<Entry>;
+      fillEntryEmptyFields: (payload: Partial<Entry> & { id: number }) => Promise<Entry>;
       deleteEntry: (payload: { id: number; adminUsername?: string; adminPassword?: string; adminNote?: string } | number) => Promise<{ success: true }>;
 
       generateReport: (filters: { dateFrom: string; dateTo: string; adminName?: string; accountingName?: string; deacon1Name?: string; deacon2Name?: string; actualMoneyOnHand?: number; forceNew?: boolean }) => Promise<GenerateReportResult>;
+      previewReport: (filters: { dateFrom: string; dateTo: string; adminName?: string; accountingName?: string }) => Promise<ReportPayload>;
       listGeneratedReports: (filters: { dateFrom: string; dateTo: string }) => Promise<GeneratedReportItem[]>;
       getGeneratedReport: (id: number) => Promise<{ id: number; dateFrom: string; dateTo: string; createdAt: string; report: ReportPayload }>;
       deleteGeneratedReport: (id: number) => Promise<{ success: true }>;

@@ -204,8 +204,9 @@ function App() {
     adminName: '',
     accountingName: '',
   });
-  const [reportAudit, setReportAudit] = useState({ actualMoneyOnHand: '0' });
+  const [reportAudit, setReportAudit] = useState({ actualMoneyOnHand: '' });
   const [report, setReport] = useState<ReportPayload | null>(null);
+  const [reportPreview, setReportPreview] = useState<ReportPayload | null>(null);
   const [generatedReports, setGeneratedReports] = useState<GeneratedReportItem[]>([]);
   const [generatedConflict, setGeneratedConflict] = useState<{
     generatedId: number;
@@ -301,6 +302,10 @@ function App() {
 
   async function generateReport() {
     if (!can(authUser?.role || null, 'reports.generate')) return;
+    if (!String(reportAudit.actualMoneyOnHand).trim()) {
+      setError('Actual Money On Hand is required.');
+      return;
+    }
     const role = normalizeRole(authUser?.role);
     const filters =
       role === 'Deacons'
@@ -324,6 +329,22 @@ function App() {
     setGeneratedConflict(null);
     setReport(result.report);
     await loadGeneratedReports();
+  }
+
+  async function loadReportPreview() {
+    if (!can(authUser?.role || null, 'reports.generate')) return;
+    const role = normalizeRole(authUser?.role);
+    const filters =
+      role === 'Deacons'
+        ? { dateFrom: reportRange.dateFrom, dateTo: reportRange.dateFrom }
+        : {
+            dateFrom: reportRange.dateFrom,
+            dateTo: reportRange.dateTo,
+            adminName: reportSignatory.adminName,
+            accountingName: reportSignatory.accountingName,
+          };
+    const data = await run('', () => window.faithflow.previewReport(filters));
+    if (data) setReportPreview(data);
   }
 
   async function loadGeneratedReports() {
@@ -428,8 +449,9 @@ function App() {
   useEffect(() => {
     if (!authUser) return;
     void loadGeneratedReports();
+    void loadReportPreview();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [reportRange.dateFrom, reportRange.dateTo, authUser?.id]);
+  }, [reportRange.dateFrom, reportRange.dateTo, reportSignatory.adminName, reportSignatory.accountingName, authUser?.id]);
 
   useEffect(() => {
     if (deacons.length < 2) return;
@@ -625,38 +647,30 @@ function App() {
     if (!duplicateDialog) return;
     const { existing, payload } = duplicateDialog;
 
-    const safePayload = {
+    const fillPayload = {
       id: existing.id,
-      memberId: existing.memberId,
-      serviceDate: existing.serviceDate,
       serviceType: existing.serviceType,
       assignedDeacon1UserId: existing.assignedDeacon1UserId || payload.assignedDeacon1UserId,
       assignedDeacon2UserId: existing.assignedDeacon2UserId || payload.assignedDeacon2UserId,
-      tithes: existing.tithes > 0 ? existing.tithes : payload.tithes,
-      faithPromise: existing.faithPromise > 0 ? existing.faithPromise : payload.faithPromise,
-      thanksgiving: existing.thanksgiving > 0 ? existing.thanksgiving : payload.thanksgiving,
-      notes: payload.notes || existing.notes || '',
+      tithes: payload.tithes,
+      faithPromise: payload.faithPromise,
+      thanksgiving: payload.thanksgiving,
+      notes: payload.notes,
     };
 
     setDuplicateDialog(null);
-    if (requiresAdminEntryApproval(normalizeRole(authUser?.role))) {
-      setPendingEntryAction({ type: 'update', payload: safePayload });
-      setAdminApproval({ adminUsername: '', adminPassword: '', adminNote: '' });
-      return;
-    }
-
-    const updated = await run('Giving entry updated.', () => window.faithflow.updateEntry(safePayload));
+    const updated = await run('Entry empty fields updated.', () => window.faithflow.fillEntryEmptyFields(fillPayload));
     if (!updated) return;
 
     setEntryForm({
       ...emptyEntryForm,
-      serviceDate: safePayload.serviceDate,
-      serviceType: deriveServiceTypeFromDate(safePayload.serviceDate),
-      assignedDeacon1UserId: safePayload.assignedDeacon1UserId,
-      assignedDeacon2UserId: safePayload.assignedDeacon2UserId,
+      serviceDate: existing.serviceDate,
+      serviceType: deriveServiceTypeFromDate(existing.serviceDate),
+      assignedDeacon1UserId: fillPayload.assignedDeacon1UserId,
+      assignedDeacon2UserId: fillPayload.assignedDeacon2UserId,
     });
     setMemberEntrySearch('');
-    await loadEntries(safePayload.serviceDate);
+    await loadEntries(existing.serviceDate);
   }
 
   async function removeEntry(id: number) {
@@ -749,6 +763,10 @@ function App() {
   }
 
   async function exportReportExcel() {
+    if (!String(reportAudit.actualMoneyOnHand).trim()) {
+      setError('Actual Money On Hand is required.');
+      return;
+    }
     const role = normalizeRole(authUser?.role);
     const filters =
       role === 'Deacons'
@@ -810,8 +828,8 @@ function App() {
 
   const role = normalizeRole(authUser.role);
   const isDeaconRole = role === 'Deacons';
-  const reportDeacon1 = report?.signatory.deacon1Name || '';
-  const reportDeacon2 = report?.signatory.deacon2Name || '';
+  const reportDeacon1 = reportPreview?.signatory.deacon1Name || report?.signatory.deacon1Name || '';
+  const reportDeacon2 = reportPreview?.signatory.deacon2Name || report?.signatory.deacon2Name || '';
   const canEditEntries = can(role, 'entries.update') || requiresAdminEntryApproval(role);
   const canDeleteEntries = can(role, 'entries.delete') || requiresAdminEntryApproval(role);
   const canUpdateEntryInForm = entryForm.id
@@ -1217,7 +1235,7 @@ function App() {
                     type="number"
                     min="0"
                     step="0.01"
-                    value={String(report?.summary.auditedAmount || 0)}
+                    value={String(reportPreview?.summary.auditedAmount ?? report?.summary.auditedAmount ?? 0)}
                     readOnly
                   />
                 </label>
