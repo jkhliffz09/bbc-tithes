@@ -1,0 +1,927 @@
+const crypto = require('node:crypto');
+const fs = require('node:fs');
+const path = require('node:path');
+const Database = require('better-sqlite3');
+const XLSX = require('xlsx');
+
+const SERVICE_TYPES = new Set(['Sunday', 'Wednesday']);
+const ROLE_TYPES = new Set(['Admin', 'Deacons', 'Accounting', 'Users']);
+
+function valueToNumber(value) {
+  if (value === null || value === undefined || value === '' || value === '-') {
+    return 0;
+  }
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function toDateString(value) {
+  if (!value) return '';
+  const d = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toISOString().slice(0, 10);
+}
+
+function ensureDir(dir) {
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+}
+
+function normalizeRole(role) {
+  const normalized = String(role || '').trim();
+  if (!ROLE_TYPES.has(normalized)) {
+    throw new Error('Invalid role. Allowed: Admin, Deacons, Accounting, Users.');
+  }
+  return normalized;
+}
+
+function hashPassword(password) {
+  return crypto.createHash('sha256').update(String(password)).digest('hex');
+}
+
+class DataService {
+  constructor(appDataPath) {
+    ensureDir(appDataPath);
+    this.dbPath = path.join(appDataPath, 'faithflow.db');
+    this.db = new Database(this.dbPath);
+    this.db.pragma('journal_mode = WAL');
+    this.db.pragma('foreign_keys = ON');
+    this.migrate();
+    this.seedDefaultUsers();
+  }
+
+  now() {
+    return new Date().toISOString();
+  }
+
+  hasColumn(table, column) {
+    const columns = this.db.prepare(`PRAGMA table_info(${table})`).all();
+    return columns.some((c) => c.name === column);
+  }
+
+  migrate() {
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS members (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        member_code TEXT,
+        full_name TEXT NOT NULL,
+        birthday TEXT,
+        contact TEXT,
+        address TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(member_code)
+      );
+
+      CREATE TABLE IF NOT EXISTS entries (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        member_id INTEGER NOT NULL,
+        service_date TEXT NOT NULL,
+        service_type TEXT NOT NULL,
+        tithes REAL NOT NULL DEFAULT 0,
+        faith_promise REAL NOT NULL DEFAULT 0,
+        loose_offerings REAL NOT NULL DEFAULT 0,
+        thanksgiving REAL NOT NULL DEFAULT 0,
+        notes TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY(member_id) REFERENCES members(id) ON DELETE CASCADE
+      );
+
+      CREATE TABLE IF NOT EXISTS users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT NOT NULL UNIQUE,
+        full_name TEXT NOT NULL,
+        role TEXT NOT NULL,
+        password_hash TEXT NOT NULL,
+        is_active INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_entries_service_date ON entries(service_date);
+      CREATE INDEX IF NOT EXISTS idx_entries_member_id ON entries(member_id);
+      CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
+    `);
+
+    if (!this.hasColumn('members', 'birthday')) {
+      this.db.exec('ALTER TABLE members ADD COLUMN birthday TEXT');
+    }
+  }
+
+  seedDefaultUsers() {
+    const seedUsers = [
+      {
+        username: 'admin',
+        fullName: 'System Admin',
+        role: 'Admin',
+        password: 'admin123',
+      },
+      {
+        username: 'deacon',
+        fullName: 'Default Deacon',
+        role: 'Deacons',
+        password: 'deacon123',
+      },
+      {
+        username: 'accounting',
+        fullName: 'Default Accounting',
+        role: 'Accounting',
+        password: 'accounting123',
+      },
+      {
+        username: 'user',
+        fullName: 'Default User',
+        role: 'Users',
+        password: 'user123',
+      },
+    ];
+
+    const exists = this.db.prepare('SELECT id FROM users WHERE username = ?');
+    const insert = this.db.prepare(
+      `INSERT INTO users (username, full_name, role, password_hash, is_active, created_at, updated_at)
+       VALUES (@username, @fullName, @role, @passwordHash, 1, @createdAt, @updatedAt)`
+    );
+
+    const now = this.now();
+
+    for (const user of seedUsers) {
+      if (exists.get(user.username)) continue;
+      insert.run({
+        username: user.username,
+        fullName: user.fullName,
+        role: user.role,
+        passwordHash: hashPassword(user.password),
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+  }
+
+  sanitizeUser(user) {
+    if (!user) return null;
+    return {
+      id: user.id,
+      username: user.username,
+      fullName: user.fullName,
+      role: user.role,
+      isActive: Boolean(user.isActive),
+      createdAt: user.createdAt,
+      updatedAt: user.updatedAt,
+    };
+  }
+
+  login(username, password) {
+    const user = this.db
+      .prepare(
+        `SELECT
+           id,
+           username,
+           full_name AS fullName,
+           role,
+           is_active AS isActive,
+           created_at AS createdAt,
+           updated_at AS updatedAt,
+           password_hash AS passwordHash
+         FROM users
+         WHERE lower(username) = lower(?)`
+      )
+      .get(String(username || '').trim());
+
+    if (!user || !user.isActive) {
+      throw new Error('Invalid username or password.');
+    }
+
+    if (user.passwordHash !== hashPassword(password)) {
+      throw new Error('Invalid username or password.');
+    }
+
+    return this.sanitizeUser(user);
+  }
+
+  verifyAdminCredentials(username, password) {
+    const user = this.db
+      .prepare('SELECT role, password_hash AS passwordHash, is_active AS isActive FROM users WHERE lower(username)=lower(?)')
+      .get(String(username || '').trim());
+
+    if (!user || !user.isActive) return false;
+    if (user.role !== 'Admin') return false;
+    return user.passwordHash === hashPassword(password);
+  }
+
+  listUsers() {
+    return this.db
+      .prepare(
+        `SELECT
+           id,
+           username,
+           full_name AS fullName,
+           role,
+           is_active AS isActive,
+           created_at AS createdAt,
+           updated_at AS updatedAt
+         FROM users
+         ORDER BY username ASC`
+      )
+      .all()
+      .map((u) => this.sanitizeUser(u));
+  }
+
+  createUser(payload) {
+    const username = String(payload.username || '').trim();
+    const fullName = String(payload.fullName || '').trim();
+    const password = String(payload.password || '');
+    const role = normalizeRole(payload.role);
+
+    if (!username) throw new Error('Username is required.');
+    if (!fullName) throw new Error('Full name is required.');
+    if (password.length < 4) throw new Error('Password must be at least 4 characters.');
+
+    const now = this.now();
+    const result = this.db
+      .prepare(
+        `INSERT INTO users (username, full_name, role, password_hash, is_active, created_at, updated_at)
+         VALUES (@username, @fullName, @role, @passwordHash, @isActive, @createdAt, @updatedAt)`
+      )
+      .run({
+        username,
+        fullName,
+        role,
+        passwordHash: hashPassword(password),
+        isActive: payload.isActive === false ? 0 : 1,
+        createdAt: now,
+        updatedAt: now,
+      });
+
+    return this.getUserById(result.lastInsertRowid);
+  }
+
+  getUserById(id) {
+    const user = this.db
+      .prepare(
+        `SELECT
+           id,
+           username,
+           full_name AS fullName,
+           role,
+           is_active AS isActive,
+           created_at AS createdAt,
+           updated_at AS updatedAt
+         FROM users
+         WHERE id = ?`
+      )
+      .get(id);
+    return this.sanitizeUser(user);
+  }
+
+  updateUser(payload) {
+    const id = Number(payload.id);
+    if (!id) throw new Error('User ID is required.');
+
+    const existing = this.db
+      .prepare('SELECT id, username FROM users WHERE id = ?')
+      .get(id);
+
+    if (!existing) throw new Error('User not found.');
+
+    const fullName = String(payload.fullName || '').trim();
+    const role = normalizeRole(payload.role);
+    if (!fullName) throw new Error('Full name is required.');
+
+    const updates = {
+      id,
+      fullName,
+      role,
+      isActive: payload.isActive === false ? 0 : 1,
+      passwordHash: payload.password ? hashPassword(String(payload.password)) : null,
+      updatedAt: this.now(),
+    };
+
+    if (updates.passwordHash) {
+      this.db
+        .prepare(
+          `UPDATE users
+           SET full_name = @fullName,
+               role = @role,
+               is_active = @isActive,
+               password_hash = @passwordHash,
+               updated_at = @updatedAt
+           WHERE id = @id`
+        )
+        .run(updates);
+    } else {
+      this.db
+        .prepare(
+          `UPDATE users
+           SET full_name = @fullName,
+               role = @role,
+               is_active = @isActive,
+               updated_at = @updatedAt
+           WHERE id = @id`
+        )
+        .run(updates);
+    }
+
+    return this.getUserById(id);
+  }
+
+  deleteUser(id) {
+    const userId = Number(id);
+    if (!userId) throw new Error('User ID is required.');
+
+    const existing = this.db.prepare('SELECT id, role FROM users WHERE id = ?').get(userId);
+    if (!existing) throw new Error('User not found.');
+
+    if (existing.role === 'Admin') {
+      const adminCount = this.db
+        .prepare(`SELECT COUNT(*) AS count FROM users WHERE role = 'Admin' AND is_active = 1`)
+        .get();
+      if (Number(adminCount?.count || 0) <= 1) {
+        throw new Error('Cannot delete the last active Admin user.');
+      }
+    }
+
+    this.db.prepare('DELETE FROM users WHERE id = ?').run(userId);
+    return { success: true };
+  }
+
+  nextMemberCode() {
+    const rows = this.db
+      .prepare(
+        `SELECT member_code AS memberCode FROM members
+         WHERE member_code IS NOT NULL AND trim(member_code) <> ''`
+      )
+      .all();
+
+    let maxCode = 0;
+    for (const row of rows) {
+      const digits = String(row.memberCode || '')
+        .replace(/\D/g, '')
+        .trim();
+      if (!digits) continue;
+      const value = Number(digits);
+      if (Number.isFinite(value)) {
+        maxCode = Math.max(maxCode, value);
+      }
+    }
+
+    return String(maxCode + 1).padStart(4, '0');
+  }
+
+  validateServiceType(type) {
+    if (!SERVICE_TYPES.has(type)) {
+      throw new Error('Service type must be Sunday or Wednesday.');
+    }
+  }
+
+  listMembers(search = '') {
+    if (search.trim()) {
+      return this.db
+        .prepare(
+          `SELECT
+             id,
+             member_code AS memberCode,
+             full_name AS fullName,
+             birthday,
+             contact,
+             address,
+             created_at AS createdAt,
+             updated_at AS updatedAt
+           FROM members
+           WHERE full_name LIKE @q OR IFNULL(member_code, '') LIKE @q
+           ORDER BY full_name ASC`
+        )
+        .all({ q: `%${search.trim()}%` });
+    }
+
+    return this.db
+      .prepare(
+        `SELECT
+           id,
+           member_code AS memberCode,
+           full_name AS fullName,
+           birthday,
+           contact,
+           address,
+           created_at AS createdAt,
+           updated_at AS updatedAt
+         FROM members
+         ORDER BY full_name ASC`
+      )
+      .all();
+  }
+
+  createMember(payload) {
+    const now = this.now();
+    const fullName = String(payload.fullName || '').trim();
+    if (!fullName) throw new Error('Member name is required.');
+
+    const memberCode = String(payload.memberCode || '').trim() || this.nextMemberCode();
+
+    const stmt = this.db.prepare(
+      `INSERT INTO members (member_code, full_name, birthday, contact, address, created_at, updated_at)
+       VALUES (@memberCode, @fullName, @birthday, @contact, @address, @createdAt, @updatedAt)`
+    );
+
+    const result = stmt.run({
+      memberCode,
+      fullName,
+      birthday: toDateString(payload.birthday) || null,
+      contact: String(payload.contact || '').trim() || null,
+      address: String(payload.address || '').trim() || null,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    return this.getMemberById(result.lastInsertRowid);
+  }
+
+  getMemberById(id) {
+    return this.db
+      .prepare(
+        `SELECT
+           id,
+           member_code AS memberCode,
+           full_name AS fullName,
+           birthday,
+           contact,
+           address,
+           created_at AS createdAt,
+           updated_at AS updatedAt
+         FROM members WHERE id = ?`
+      )
+      .get(id);
+  }
+
+  updateMember(payload) {
+    const id = Number(payload.id);
+    if (!id) throw new Error('Member ID is required.');
+    const fullName = String(payload.fullName || '').trim();
+    if (!fullName) throw new Error('Member name is required.');
+
+    const requestedCode = String(payload.memberCode || '').trim();
+    const memberCode = requestedCode || this.nextMemberCode();
+
+    this.db
+      .prepare(
+        `UPDATE members
+         SET member_code = @memberCode,
+             full_name = @fullName,
+             birthday = @birthday,
+             contact = @contact,
+             address = @address,
+             updated_at = @updatedAt
+         WHERE id = @id`
+      )
+      .run({
+        id,
+        memberCode,
+        fullName,
+        birthday: toDateString(payload.birthday) || null,
+        contact: String(payload.contact || '').trim() || null,
+        address: String(payload.address || '').trim() || null,
+        updatedAt: this.now(),
+      });
+
+    return this.getMemberById(id);
+  }
+
+  deleteMember(id) {
+    const memberId = Number(id);
+    if (!memberId) throw new Error('Member ID is required.');
+    this.db.prepare('DELETE FROM members WHERE id = ?').run(memberId);
+    return { success: true };
+  }
+
+  listEntries(filters = {}) {
+    const month = String(filters.month || '').trim();
+    const memberId = Number(filters.memberId || 0);
+
+    const conditions = [];
+    const params = {};
+
+    if (month) {
+      conditions.push('e.service_date LIKE @monthPrefix');
+      params.monthPrefix = `${month}%`;
+    }
+
+    if (memberId) {
+      conditions.push('e.member_id = @memberId');
+      params.memberId = memberId;
+    }
+
+    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+
+    return this.db
+      .prepare(
+        `SELECT
+           e.id,
+           e.member_id AS memberId,
+           m.full_name AS memberName,
+           m.member_code AS memberCode,
+           e.service_date AS serviceDate,
+           e.service_type AS serviceType,
+           e.tithes,
+           e.faith_promise AS faithPromise,
+           e.loose_offerings AS looseOfferings,
+           e.thanksgiving,
+           e.notes,
+           e.created_at AS createdAt,
+           e.updated_at AS updatedAt
+         FROM entries e
+         INNER JOIN members m ON m.id = e.member_id
+         ${where}
+         ORDER BY e.service_date DESC, m.full_name ASC`
+      )
+      .all(params);
+  }
+
+  createEntry(payload) {
+    const now = this.now();
+    const memberId = Number(payload.memberId);
+    if (!memberId) throw new Error('Member is required.');
+
+    const serviceDate = toDateString(payload.serviceDate);
+    if (!serviceDate) throw new Error('Service date is required.');
+
+    this.validateServiceType(payload.serviceType);
+
+    const stmt = this.db.prepare(
+      `INSERT INTO entries
+      (member_id, service_date, service_type, tithes, faith_promise, loose_offerings, thanksgiving, notes, created_at, updated_at)
+      VALUES
+      (@memberId, @serviceDate, @serviceType, @tithes, @faithPromise, @looseOfferings, @thanksgiving, @notes, @createdAt, @updatedAt)`
+    );
+
+    const result = stmt.run({
+      memberId,
+      serviceDate,
+      serviceType: payload.serviceType,
+      tithes: valueToNumber(payload.tithes),
+      faithPromise: valueToNumber(payload.faithPromise),
+      looseOfferings: valueToNumber(payload.looseOfferings),
+      thanksgiving: valueToNumber(payload.thanksgiving),
+      notes: String(payload.notes || '').trim() || null,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    return this.getEntryById(result.lastInsertRowid);
+  }
+
+  getEntryById(id) {
+    return this.db
+      .prepare(
+        `SELECT
+           e.id,
+           e.member_id AS memberId,
+           m.full_name AS memberName,
+           m.member_code AS memberCode,
+           e.service_date AS serviceDate,
+           e.service_type AS serviceType,
+           e.tithes,
+           e.faith_promise AS faithPromise,
+           e.loose_offerings AS looseOfferings,
+           e.thanksgiving,
+           e.notes,
+           e.created_at AS createdAt,
+           e.updated_at AS updatedAt
+         FROM entries e
+         INNER JOIN members m ON m.id = e.member_id
+         WHERE e.id = ?`
+      )
+      .get(id);
+  }
+
+  updateEntry(payload) {
+    const id = Number(payload.id);
+    if (!id) throw new Error('Entry ID is required.');
+    const memberId = Number(payload.memberId);
+    if (!memberId) throw new Error('Member is required.');
+    const serviceDate = toDateString(payload.serviceDate);
+    if (!serviceDate) throw new Error('Service date is required.');
+
+    this.validateServiceType(payload.serviceType);
+
+    this.db
+      .prepare(
+        `UPDATE entries
+         SET member_id = @memberId,
+             service_date = @serviceDate,
+             service_type = @serviceType,
+             tithes = @tithes,
+             faith_promise = @faithPromise,
+             loose_offerings = @looseOfferings,
+             thanksgiving = @thanksgiving,
+             notes = @notes,
+             updated_at = @updatedAt
+         WHERE id = @id`
+      )
+      .run({
+        id,
+        memberId,
+        serviceDate,
+        serviceType: payload.serviceType,
+        tithes: valueToNumber(payload.tithes),
+        faithPromise: valueToNumber(payload.faithPromise),
+        looseOfferings: valueToNumber(payload.looseOfferings),
+        thanksgiving: valueToNumber(payload.thanksgiving),
+        notes: String(payload.notes || '').trim() || null,
+        updatedAt: this.now(),
+      });
+
+    return this.getEntryById(id);
+  }
+
+  deleteEntry(id) {
+    const entryId = Number(id);
+    if (!entryId) throw new Error('Entry ID is required.');
+    this.db.prepare('DELETE FROM entries WHERE id = ?').run(entryId);
+    return { success: true };
+  }
+
+  getReport(filters = {}) {
+    const dateFrom = toDateString(filters.dateFrom) || '1900-01-01';
+    const dateTo = toDateString(filters.dateTo) || '2999-12-31';
+
+    const rows = this.db
+      .prepare(
+        `SELECT
+           m.id AS memberId,
+           m.member_code AS memberCode,
+           m.full_name AS memberName,
+           SUM(e.tithes) AS tithes,
+           SUM(e.faith_promise) AS faithPromise,
+           SUM(e.loose_offerings) AS looseOfferings,
+           SUM(e.thanksgiving) AS thanksgiving,
+           SUM(e.tithes + e.faith_promise + e.loose_offerings + e.thanksgiving) AS total
+         FROM entries e
+         INNER JOIN members m ON m.id = e.member_id
+         WHERE e.service_date BETWEEN @dateFrom AND @dateTo
+         GROUP BY m.id, m.member_code, m.full_name
+         ORDER BY m.full_name ASC`
+      )
+      .all({ dateFrom, dateTo });
+
+    const summary = this.db
+      .prepare(
+        `SELECT
+           SUM(tithes) AS tithes,
+           SUM(faith_promise) AS faithPromise,
+           SUM(loose_offerings) AS looseOfferings,
+           SUM(thanksgiving) AS thanksgiving,
+           SUM(tithes + faith_promise + loose_offerings + thanksgiving) AS total
+         FROM entries
+         WHERE service_date BETWEEN @dateFrom AND @dateTo`
+      )
+      .get({ dateFrom, dateTo });
+
+    return {
+      dateFrom,
+      dateTo,
+      rows,
+      summary: {
+        tithes: valueToNumber(summary?.tithes),
+        faithPromise: valueToNumber(summary?.faithPromise),
+        looseOfferings: valueToNumber(summary?.looseOfferings),
+        thanksgiving: valueToNumber(summary?.thanksgiving),
+        total: valueToNumber(summary?.total),
+      },
+    };
+  }
+
+  exportReportWorkbook(targetPath, filters = {}) {
+    if (!targetPath) throw new Error('Export path is required.');
+    const report = this.getReport(filters);
+
+    const wb = XLSX.utils.book_new();
+
+    const detailSheet = XLSX.utils.json_to_sheet(
+      report.rows.map((row) => ({
+        MemberCode: row.memberCode || '',
+        MemberName: row.memberName,
+        Tithes: row.tithes,
+        FaithPromise: row.faithPromise,
+        LooseOfferings: row.looseOfferings,
+        Thanksgiving: row.thanksgiving,
+        Total: row.total,
+      }))
+    );
+
+    const summarySheet = XLSX.utils.json_to_sheet([
+      {
+        DateFrom: report.dateFrom,
+        DateTo: report.dateTo,
+        Tithes: report.summary.tithes,
+        FaithPromise: report.summary.faithPromise,
+        LooseOfferings: report.summary.looseOfferings,
+        Thanksgiving: report.summary.thanksgiving,
+        Total: report.summary.total,
+      },
+    ]);
+
+    XLSX.utils.book_append_sheet(wb, summarySheet, 'Summary');
+    XLSX.utils.book_append_sheet(wb, detailSheet, 'Details');
+    XLSX.writeFile(wb, targetPath);
+
+    return {
+      success: true,
+      path: targetPath,
+      rowCount: report.rows.length,
+      dateFrom: report.dateFrom,
+      dateTo: report.dateTo,
+    };
+  }
+
+  exportWorkbook(targetPath) {
+    if (!targetPath) throw new Error('Export path is required.');
+
+    const members = this.listMembers('');
+    const entries = this.listEntries({});
+
+    const wb = XLSX.utils.book_new();
+    const membersSheet = XLSX.utils.json_to_sheet(
+      members.map((m) => ({
+        MemberCode: m.memberCode || '',
+        FullName: m.fullName,
+        Birthday: m.birthday || '',
+        Contact: m.contact || '',
+        Address: m.address || '',
+      }))
+    );
+
+    const entriesSheet = XLSX.utils.json_to_sheet(
+      entries.map((e) => ({
+        MemberName: e.memberName,
+        MemberCode: e.memberCode || '',
+        ServiceDate: e.serviceDate,
+        ServiceType: e.serviceType,
+        Tithes: e.tithes,
+        FaithPromise: e.faithPromise,
+        LooseOfferings: e.looseOfferings,
+        Thanksgiving: e.thanksgiving,
+        Notes: e.notes || '',
+      }))
+    );
+
+    XLSX.utils.book_append_sheet(wb, membersSheet, 'Members');
+    XLSX.utils.book_append_sheet(wb, entriesSheet, 'Entries');
+    XLSX.writeFile(wb, targetPath);
+
+    return {
+      success: true,
+      path: targetPath,
+      memberCount: members.length,
+      entryCount: entries.length,
+    };
+  }
+
+  importAppWorkbook(sourcePath) {
+    if (!sourcePath) throw new Error('Import path is required.');
+
+    const wb = XLSX.readFile(sourcePath);
+    const membersSheet = wb.Sheets.Members;
+    const entriesSheet = wb.Sheets.Entries;
+
+    if (!membersSheet || !entriesSheet) {
+      throw new Error('Workbook must contain Members and Entries sheets.');
+    }
+
+    const members = XLSX.utils.sheet_to_json(membersSheet, { defval: '' });
+    const entries = XLSX.utils.sheet_to_json(entriesSheet, { defval: '' });
+
+    const tx = this.db.transaction(() => {
+      this.db.prepare('DELETE FROM entries').run();
+      this.db.prepare('DELETE FROM members').run();
+
+      const insertMember = this.db.prepare(
+        `INSERT INTO members (member_code, full_name, birthday, contact, address, created_at, updated_at)
+         VALUES (@memberCode, @fullName, @birthday, @contact, @address, @createdAt, @updatedAt)`
+      );
+
+      const now = this.now();
+      const memberMap = new Map();
+
+      for (const row of members) {
+        const fullName = String(row.FullName || '').trim();
+        if (!fullName) continue;
+
+        const memberCode = String(row.MemberCode || '').trim() || this.nextMemberCode();
+
+        const result = insertMember.run({
+          memberCode,
+          fullName,
+          birthday: toDateString(row.Birthday) || null,
+          contact: String(row.Contact || '').trim() || null,
+          address: String(row.Address || '').trim() || null,
+          createdAt: now,
+          updatedAt: now,
+        });
+
+        memberMap.set(fullName.toLowerCase(), result.lastInsertRowid);
+      }
+
+      const insertEntry = this.db.prepare(
+        `INSERT INTO entries
+        (member_id, service_date, service_type, tithes, faith_promise, loose_offerings, thanksgiving, notes, created_at, updated_at)
+        VALUES
+        (@memberId, @serviceDate, @serviceType, @tithes, @faithPromise, @looseOfferings, @thanksgiving, @notes, @createdAt, @updatedAt)`
+      );
+
+      for (const row of entries) {
+        const memberName = String(row.MemberName || '').trim();
+        if (!memberName) continue;
+
+        const memberId = memberMap.get(memberName.toLowerCase());
+        if (!memberId) continue;
+
+        const serviceType = String(row.ServiceType || '').trim();
+        if (!SERVICE_TYPES.has(serviceType)) continue;
+
+        const serviceDate = toDateString(row.ServiceDate);
+        if (!serviceDate) continue;
+
+        insertEntry.run({
+          memberId,
+          serviceDate,
+          serviceType,
+          tithes: valueToNumber(row.Tithes),
+          faithPromise: valueToNumber(row.FaithPromise),
+          looseOfferings: valueToNumber(row.LooseOfferings),
+          thanksgiving: valueToNumber(row.Thanksgiving),
+          notes: String(row.Notes || '').trim() || null,
+          createdAt: now,
+          updatedAt: now,
+        });
+      }
+    });
+
+    tx();
+
+    return {
+      success: true,
+      memberCount: this.listMembers('').length,
+      entryCount: this.listEntries({}).length,
+    };
+  }
+
+  importMembersTemplate(sourcePath) {
+    if (!sourcePath) throw new Error('Import path is required.');
+
+    const wb = XLSX.readFile(sourcePath, { cellDates: true });
+    const names = new Set();
+
+    for (const name of wb.SheetNames) {
+      const ws = wb.Sheets[name];
+      const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+
+      for (let i = 6; i < rows.length; i += 1) {
+        const raw = rows[i]?.[0];
+        const fullName = String(raw || '').trim();
+        if (!fullName || /^(total|church members)$/i.test(fullName)) continue;
+        if (/^\d+$/.test(fullName)) continue;
+        names.add(fullName);
+      }
+    }
+
+    const now = this.now();
+    const insert = this.db.prepare(
+      `INSERT INTO members (member_code, full_name, birthday, contact, address, created_at, updated_at)
+       VALUES (@memberCode, @fullName, @birthday, @contact, @address, @createdAt, @updatedAt)`
+    );
+
+    const exists = this.db.prepare('SELECT id FROM members WHERE lower(full_name) = lower(?)');
+
+    let imported = 0;
+    const tx = this.db.transaction(() => {
+      for (const fullName of names) {
+        if (exists.get(fullName)) continue;
+        insert.run({
+          memberCode: this.nextMemberCode(),
+          fullName,
+          birthday: null,
+          contact: null,
+          address: null,
+          createdAt: now,
+          updatedAt: now,
+        });
+        imported += 1;
+      }
+    });
+
+    tx();
+
+    return {
+      success: true,
+      imported,
+      totalMembers: this.listMembers('').length,
+    };
+  }
+
+  close() {
+    this.db.close();
+  }
+}
+
+module.exports = { DataService };
