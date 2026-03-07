@@ -191,6 +191,7 @@ function App() {
   });
   const [reportAudit, setReportAudit] = useState({ actualMoneyOnHand: '0' });
   const [report, setReport] = useState<ReportPayload | null>(null);
+  const [previewOpen, setPreviewOpen] = useState(false);
   const [generatedReports, setGeneratedReports] = useState<GeneratedReportItem[]>([]);
   const [generatedConflict, setGeneratedConflict] = useState<{
     generatedId: number;
@@ -703,13 +704,18 @@ function App() {
     window.print();
   }
 
+  function openPrintPreview() {
+    if (!report) return;
+    setPreviewOpen(true);
+  }
+
   if (!authUser) {
     return (
       <div className="app-shell login-shell">
-        <section className="panel login-panel">
+        <section className="panel login-panel w-full max-w-md rounded-2xl border border-slate-200 bg-white/95 p-6 shadow-xl">
           <img src="logo-placeholder.svg" alt="BBC Logo" className="login-logo" />
-          <h1>FaithFlow - BBC Tithes and Offerings</h1>
-          <p>Sign in to continue.</p>
+          <h1 className="text-2xl font-semibold tracking-tight text-slate-800">FaithFlow - BBC Tithes and Offerings</h1>
+          <p className="text-slate-500">Sign in to continue.</p>
           <form className="form" onSubmit={login}>
             <label>
               Username
@@ -728,7 +734,7 @@ function App() {
                 required
               />
             </label>
-            <button type="submit" disabled={busy}>
+            <button type="submit" disabled={busy} className="w-full">
               Sign In
             </button>
           </form>
@@ -1112,7 +1118,6 @@ function App() {
                     </label>
                   </>
                 )}
-                {isDeaconRole && <span className="muted">Deacons: single-day report only.</span>}
                 {isDeaconRole ? (
                   <>
                     <label>
@@ -1163,7 +1168,7 @@ function App() {
                   />
                 </label>
                 <button onClick={generateReport} disabled={busy || !can(role, 'reports.generate')}>Generate</button>
-                <button className="secondary" onClick={printReport}>Print</button>
+                <button className="secondary" onClick={openPrintPreview}>Print</button>
                 {can(role, 'reports.export') && (
                   <button className="secondary" onClick={exportReportExcel}>Export Excel</button>
                 )}
@@ -1453,6 +1458,50 @@ function App() {
                 </button>
               </div>
             </form>
+          </section>
+        </div>
+      )}
+      {previewOpen && report && (
+        <div className="modal-backdrop" role="presentation">
+          <section className="modal-card">
+            <h3>Print Preview</h3>
+            <p className="muted">{report.dateFrom === report.dateTo ? report.dateFrom : `${report.dateFrom} to ${report.dateTo}`}</p>
+            <div className="table-wrap" style={{ maxHeight: '40vh' }}>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Member</th>
+                    <th>Tithes</th>
+                    <th>Faith Promise</th>
+                    <th>Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {report.rows.map((row) => (
+                    <tr key={`preview-${row.memberId}`}>
+                      <td>{row.memberName}</td>
+                      <td>{money(row.tithes)}</td>
+                      <td>{money(row.faithPromise)}</td>
+                      <td>{money(row.total)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="row-actions">
+              <button
+                type="button"
+                onClick={() => {
+                  setPreviewOpen(false);
+                  setTimeout(() => printReport(), 80);
+                }}
+              >
+                Print Now
+              </button>
+              <button type="button" className="secondary" onClick={() => setPreviewOpen(false)}>
+                Close
+              </button>
+            </div>
           </section>
         </div>
       )}
