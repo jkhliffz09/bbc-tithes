@@ -552,7 +552,6 @@ app.whenReady().then(() => {
             dateTo: today,
             deacon1Name,
             deacon2Name,
-            auditedAmount: Number(filters?.auditedAmount || 0),
             actualMoneyOnHand: Number(filters?.actualMoneyOnHand || 0),
           }),
         };
@@ -565,7 +564,6 @@ app.whenReady().then(() => {
           dateTo: filters?.dateTo,
           adminName: String(filters?.adminName || '').trim(),
           accountingName: String(filters?.accountingName || '').trim(),
-          auditedAmount: Number(filters?.auditedAmount || 0),
           actualMoneyOnHand: Number(filters?.actualMoneyOnHand || 0),
         }),
       };
@@ -601,7 +599,6 @@ app.whenReady().then(() => {
             dateTo: today,
             deacon1Name,
             deacon2Name,
-            auditedAmount: Number(filters?.auditedAmount || 0),
             actualMoneyOnHand: Number(filters?.actualMoneyOnHand || 0),
           }),
         };
@@ -614,7 +611,6 @@ app.whenReady().then(() => {
           dateTo: filters?.dateTo,
           adminName: String(filters?.adminName || '').trim(),
           accountingName: String(filters?.accountingName || '').trim(),
-          auditedAmount: Number(filters?.auditedAmount || 0),
           actualMoneyOnHand: Number(filters?.actualMoneyOnHand || 0),
         }),
       };

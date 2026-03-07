@@ -119,13 +119,13 @@ declare global {
       updateMember: (payload: Partial<Member> & { id: number }) => Promise<Member>;
       deleteMember: (id: number) => Promise<{ success: true }>;
 
-      listEntries: (filters: { month?: string; memberId?: number }) => Promise<Entry[]>;
+      listEntries: (filters: { month?: string; date?: string; memberId?: number }) => Promise<Entry[]>;
       createEntry: (payload: Partial<Entry>) => Promise<Entry>;
       updateEntry: (payload: Partial<Entry> & { id: number; adminUsername?: string; adminPassword?: string; adminNote?: string }) => Promise<Entry>;
       deleteEntry: (payload: { id: number; adminUsername?: string; adminPassword?: string; adminNote?: string } | number) => Promise<{ success: true }>;
 
-      generateReport: (filters: { dateFrom: string; dateTo: string; adminName?: string; accountingName?: string; deacon1Name?: string; deacon2Name?: string; auditedAmount?: number; actualMoneyOnHand?: number }) => Promise<ReportPayload>;
-      exportReportExcel: (filters: { dateFrom: string; dateTo: string; adminName?: string; accountingName?: string; deacon1Name?: string; deacon2Name?: string; auditedAmount?: number; actualMoneyOnHand?: number }) => Promise<ImportExportResult>;
+      generateReport: (filters: { dateFrom: string; dateTo: string; adminName?: string; accountingName?: string; deacon1Name?: string; deacon2Name?: string; actualMoneyOnHand?: number }) => Promise<ReportPayload>;
+      exportReportExcel: (filters: { dateFrom: string; dateTo: string; adminName?: string; accountingName?: string; deacon1Name?: string; deacon2Name?: string; actualMoneyOnHand?: number }) => Promise<ImportExportResult>;
       importMembersTemplate: () => Promise<ImportExportResult>;
       importAppWorkbook: () => Promise<ImportExportResult>;
       exportAppWorkbook: () => Promise<ImportExportResult>;

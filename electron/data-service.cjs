@@ -576,6 +576,7 @@ class DataService {
 
   listEntries(filters = {}) {
     const month = String(filters.month || '').trim();
+    const date = toDateString(filters.date);
     const memberId = Number(filters.memberId || 0);
 
     const conditions = [];
@@ -584,6 +585,11 @@ class DataService {
     if (month) {
       conditions.push('e.service_date LIKE @monthPrefix');
       params.monthPrefix = `${month}%`;
+    }
+
+    if (date) {
+      conditions.push('e.service_date = @date');
+      params.date = date;
     }
 
     if (memberId) {
@@ -789,10 +795,9 @@ class DataService {
       )
       .get({ dateFrom, dateTo });
 
-    const auditedAmount = valueToNumber(filters.auditedAmount);
+    const auditedAmount = valueToNumber(summary?.total);
     const actualMoneyOnHand = valueToNumber(filters.actualMoneyOnHand);
     const looseOfferings = auditedAmount - actualMoneyOnHand;
-    const baseTotal = valueToNumber(summary?.total);
 
     const signatory = {
       adminName: String(filters.adminName || '').trim(),
@@ -813,7 +818,7 @@ class DataService {
         thanksgiving: valueToNumber(summary?.thanksgiving),
         auditedAmount,
         actualMoneyOnHand,
-        total: baseTotal + looseOfferings,
+        total: auditedAmount,
       },
     };
   }

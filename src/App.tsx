@@ -79,7 +79,6 @@ function deriveServiceTypeFromDate(dateStr: string): ServiceType {
 }
 
 const startDate = nearestPastServiceDate(new Date());
-const initialMonth = `${startDate.getFullYear()}-${String(startDate.getMonth() + 1).padStart(2, '0')}`;
 const initialDate = toISODate(startDate);
 
 const emptyMemberForm: MemberForm = {
@@ -202,7 +201,7 @@ function App() {
   const [memberForm, setMemberForm] = useState<MemberForm>(emptyMemberForm);
 
   const [memberEntrySearch, setMemberEntrySearch] = useState('');
-  const [selectedMonth, setSelectedMonth] = useState(initialMonth);
+  const [selectedDate, setSelectedDate] = useState(initialDate);
   const [entries, setEntries] = useState<Entry[]>([]);
   const [entryForm, setEntryForm] = useState<EntryForm>(emptyEntryForm);
 
@@ -214,10 +213,7 @@ function App() {
     adminName: '',
     accountingName: '',
   });
-  const [reportAudit, setReportAudit] = useState({
-    auditedAmount: '0',
-    actualMoneyOnHand: '0',
-  });
+  const [reportAudit, setReportAudit] = useState({ actualMoneyOnHand: '0' });
   const [report, setReport] = useState<ReportPayload | null>(null);
   const [pendingEntryAction, setPendingEntryAction] = useState<PendingEntryAction | null>(null);
   const [adminApproval, setAdminApproval] = useState({ adminUsername: '', adminPassword: '', adminNote: '' });
@@ -292,9 +288,9 @@ function App() {
     if (data) setMembers(data);
   }
 
-  async function loadEntries(month = selectedMonth) {
+  async function loadEntries(date = selectedDate) {
     if (!can(authUser?.role || null, 'entries.list')) return;
-    const data = await run('', () => window.faithflow.listEntries({ month }));
+    const data = await run('', () => window.faithflow.listEntries({ date }));
     if (data) setEntries(data);
   }
 
@@ -314,14 +310,12 @@ function App() {
             dateTo: localTodayISO(),
             deacon1Name: deacon1?.fullName || '',
             deacon2Name: deacon2?.fullName || '',
-            auditedAmount: amount(reportAudit.auditedAmount),
             actualMoneyOnHand: amount(reportAudit.actualMoneyOnHand),
           }
         : {
             ...reportRange,
             adminName: reportSignatory.adminName,
             accountingName: reportSignatory.accountingName,
-            auditedAmount: amount(reportAudit.auditedAmount),
             actualMoneyOnHand: amount(reportAudit.actualMoneyOnHand),
           };
     const payload = await run('', () => window.faithflow.generateReport(filters));
@@ -361,7 +355,7 @@ function App() {
     if (!authUser) return;
     const role = normalizeRole(authUser.role);
     void loadMembers('');
-    void loadEntries(initialMonth);
+    void loadEntries(initialDate);
     if (role !== 'Deacons') {
       void generateReport();
     }
@@ -660,14 +654,12 @@ function App() {
             dateTo: localTodayISO(),
             deacon1Name: deacon1?.fullName || '',
             deacon2Name: deacon2?.fullName || '',
-            auditedAmount: amount(reportAudit.auditedAmount),
             actualMoneyOnHand: amount(reportAudit.actualMoneyOnHand),
           }
         : {
             ...reportRange,
             adminName: reportSignatory.adminName,
             accountingName: reportSignatory.accountingName,
-            auditedAmount: amount(reportAudit.auditedAmount),
             actualMoneyOnHand: amount(reportAudit.actualMoneyOnHand),
           };
     const result = await run('', () => window.faithflow.exportReportExcel(filters));
@@ -997,12 +989,12 @@ function App() {
               <div className="split-header">
                 <h2>Giving Entries</h2>
                 <label>
-                  Month
+                  Day
                   <input
-                    type="month"
-                    value={selectedMonth}
+                    type="date"
+                    value={selectedDate}
                     onChange={(e) => {
-                      setSelectedMonth(e.target.value);
+                      setSelectedDate(e.target.value);
                       void loadEntries(e.target.value);
                     }}
                   />
@@ -1110,8 +1102,8 @@ function App() {
                     type="number"
                     min="0"
                     step="0.01"
-                    value={reportAudit.auditedAmount}
-                    onChange={(e) => setReportAudit((p) => ({ ...p, auditedAmount: e.target.value }))}
+                    value={String(report?.summary.auditedAmount || 0)}
+                    readOnly
                   />
                 </label>
                 <label>
