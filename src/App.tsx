@@ -1035,28 +1035,23 @@ function App() {
                   </label>
                 </div>
 
-                <div className="grid-inline">
-                  <label>
-                    Date *
-                    <input
-                      type="date"
-                      value={entryForm.serviceDate}
-                      onChange={(e) => {
-                        const date = e.target.value;
-                        setEntryForm((p) => ({
-                          ...p,
-                          serviceDate: date,
-                          serviceType: deriveServiceTypeFromDate(date),
-                        }));
-                      }}
-                      required
-                    />
-                  </label>
-                  <label>
-                    Day
-                    <input value={entryForm.serviceType} readOnly />
-                  </label>
-                </div>
+                <label>
+                  Date *
+                  <input
+                    type="date"
+                    value={entryForm.serviceDate}
+                    onChange={(e) => {
+                      const date = e.target.value;
+                      setEntryForm((p) => ({
+                        ...p,
+                        serviceDate: date,
+                        serviceType: deriveServiceTypeFromDate(date),
+                      }));
+                    }}
+                    required
+                  />
+                  <small className="muted">{entryForm.serviceType}</small>
+                </label>
 
                 <div className="grid-inline">
                   <label>
@@ -1133,8 +1128,8 @@ function App() {
                   <thead>
                     <tr>
                       <th>Date</th>
-                      <th>Service</th>
                       <th>Member</th>
+                      <th>Giving</th>
                       <th>Total</th>
                       <th>Actions</th>
                     </tr>
@@ -1144,9 +1139,18 @@ function App() {
                       const total = entry.tithes + entry.faithPromise + entry.thanksgiving;
                       return (
                         <tr key={entry.id}>
-                          <td>{entry.serviceDate}</td>
-                          <td>{entry.serviceType}</td>
+                          <td>
+                            <div>{entry.serviceDate}</div>
+                            <small className="muted">{entry.serviceType}</small>
+                          </td>
                           <td>{entry.memberName}</td>
+                          <td>
+                            <div className="text-xs">
+                              {entry.tithes > 0 && <div>TITHES: {money(entry.tithes)}</div>}
+                              {entry.faithPromise > 0 && <div>FAITH PROMISE: {money(entry.faithPromise)}</div>}
+                              {entry.thanksgiving > 0 && <div>THANKSGIVING: {money(entry.thanksgiving)}</div>}
+                            </div>
+                          </td>
                           <td>{money(total)}</td>
                           <td>
                             <div className="inline-actions">
