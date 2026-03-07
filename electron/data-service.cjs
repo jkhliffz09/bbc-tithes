@@ -521,19 +521,15 @@ class DataService {
     return { firstName, middleName, lastName, suffix, fullName };
   }
 
-  findMemberDuplicateByName({ firstName, middleName, lastName, suffix }, excludeId = null) {
+  findMemberDuplicateByName({ firstName, lastName }, excludeId = null) {
     const sql = `SELECT id FROM members
       WHERE lower(trim(ifnull(first_name, ''))) = lower(trim(@firstName))
-        AND lower(trim(ifnull(middle_name, ''))) = lower(trim(@middleName))
         AND lower(trim(ifnull(last_name, ''))) = lower(trim(@lastName))
-        AND lower(trim(ifnull(suffix, ''))) = lower(trim(@suffix))
         ${excludeId ? 'AND id <> @excludeId' : ''}
       LIMIT 1`;
     const params = {
       firstName: firstName || '',
-      middleName: middleName || '',
       lastName: lastName || '',
-      suffix: suffix || '',
       ...(excludeId ? { excludeId: Number(excludeId) } : {}),
     };
     return this.db.prepare(sql).get(params);
@@ -594,7 +590,7 @@ class DataService {
     const now = this.now();
     const { firstName, middleName, lastName, suffix, fullName } = this.fullNameFromParts(payload);
     if (!firstName || !lastName) throw new Error('First name and last name are required.');
-    if (this.findMemberDuplicateByName({ firstName, middleName, lastName, suffix })) {
+    if (this.findMemberDuplicateByName({ firstName, lastName })) {
       throw new Error('Member already exists.');
     }
 
@@ -648,7 +644,7 @@ class DataService {
     if (!id) throw new Error('Member ID is required.');
     const { firstName, middleName, lastName, suffix, fullName } = this.fullNameFromParts(payload);
     if (!firstName || !lastName) throw new Error('First name and last name are required.');
-    if (this.findMemberDuplicateByName({ firstName, middleName, lastName, suffix }, id)) {
+    if (this.findMemberDuplicateByName({ firstName, lastName }, id)) {
       throw new Error('Member already exists.');
     }
 
@@ -1643,7 +1639,7 @@ class DataService {
         if (!firstName || !lastName) continue;
         const duplicateKey = `${firstName.toLowerCase()}|${middleName.toLowerCase()}|${lastName.toLowerCase()}|${suffix.toLowerCase()}`;
         if (seenInFile.has(duplicateKey)) continue;
-        if (this.findMemberDuplicateByName({ firstName, middleName, lastName, suffix })) continue;
+        if (this.findMemberDuplicateByName({ firstName, lastName })) continue;
         const fullName = [firstName, middleName, lastName, suffix].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
         if (!fullName) continue;
         insert.run({

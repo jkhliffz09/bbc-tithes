@@ -140,6 +140,39 @@ function normalizeRole(role: unknown): Role | null {
   return null;
 }
 
+function normalizeNameText(value: string): string {
+  return String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '').trim();
+}
+
+function levenshtein(aRaw: string, bRaw: string): number {
+  const a = normalizeNameText(aRaw);
+  const b = normalizeNameText(bRaw);
+  if (a === b) return 0;
+  if (!a.length) return b.length;
+  if (!b.length) return a.length;
+  const dp = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i += 1) {
+    let prev = dp[0];
+    dp[0] = i;
+    for (let j = 1; j <= b.length; j += 1) {
+      const tmp = dp[j];
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      dp[j] = Math.min(dp[j] + 1, dp[j - 1] + 1, prev + cost);
+      prev = tmp;
+    }
+  }
+  return dp[b.length];
+}
+
+function isPotentialMistype(a: string, b: string): boolean {
+  const an = normalizeNameText(a);
+  const bn = normalizeNameText(b);
+  if (!an || !bn || an === bn) return false;
+  const dist = levenshtein(an, bn);
+  const maxLen = Math.max(an.length, bn.length);
+  return dist <= 2 || dist / maxLen <= 0.25;
+}
+
 function requiresAdminEntryApproval(role: Role | null): boolean {
   return role === 'Deacon' || role === 'Accounting';
 }
@@ -642,16 +675,44 @@ function App() {
 
   async function submitMember(event: FormEvent) {
     event.preventDefault();
-    if (!memberForm.firstName.trim() || !memberForm.lastName.trim()) {
+    const firstName = memberForm.firstName.trim();
+    const lastName = memberForm.lastName.trim();
+    if (!firstName || !lastName) {
       setError('First name and last name are required.');
       return;
+    }
+    const firstNorm = normalizeNameText(firstName);
+    const lastNorm = normalizeNameText(lastName);
+
+    const exactDuplicate = members.find(
+      (m) =>
+        m.id !== (memberForm.id || 0) &&
+        normalizeNameText(m.firstName || '') === firstNorm &&
+        normalizeNameText(m.lastName || '') === lastNorm
+    );
+    if (exactDuplicate) {
+      window.alert('Member already exists.');
+      return;
+    }
+
+    const maybeDuplicate = members.find(
+      (m) =>
+        m.id !== (memberForm.id || 0) &&
+        isPotentialMistype(m.firstName || '', firstName) &&
+        isPotentialMistype(m.lastName || '', lastName)
+    );
+    if (maybeDuplicate) {
+      const proceed = window.confirm(
+        `Potential duplicate found: ${maybeDuplicate.fullName}.\n\nMaybe this is a mistype.\nDo you want to continue saving this member?`
+      );
+      if (!proceed) return;
     }
 
     const payload = {
       memberCode: memberForm.memberCode,
-      firstName: memberForm.firstName,
+      firstName,
       middleName: memberForm.middleName,
-      lastName: memberForm.lastName,
+      lastName,
       suffix: memberForm.suffix,
       birthday: memberForm.birthday,
       contact: memberForm.contact,
