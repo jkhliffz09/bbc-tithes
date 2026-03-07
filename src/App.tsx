@@ -676,19 +676,25 @@ function App() {
   async function submitMember(event: FormEvent) {
     event.preventDefault();
     const firstName = memberForm.firstName.trim();
+    const middleName = memberForm.middleName.trim();
     const lastName = memberForm.lastName.trim();
+    const suffix = memberForm.suffix.trim();
     if (!firstName || !lastName) {
       setError('First name and last name are required.');
       return;
     }
     const firstNorm = normalizeNameText(firstName);
+    const middleNorm = normalizeNameText(middleName);
     const lastNorm = normalizeNameText(lastName);
+    const suffixNorm = normalizeNameText(suffix);
 
     const exactDuplicate = members.find(
       (m) =>
         m.id !== (memberForm.id || 0) &&
         normalizeNameText(m.firstName || '') === firstNorm &&
-        normalizeNameText(m.lastName || '') === lastNorm
+        normalizeNameText(m.middleName || '') === middleNorm &&
+        normalizeNameText(m.lastName || '') === lastNorm &&
+        normalizeNameText(m.suffix || '') === suffixNorm
     );
     if (exactDuplicate) {
       window.alert('Member already exists.');
@@ -711,9 +717,9 @@ function App() {
     const payload = {
       memberCode: memberForm.memberCode,
       firstName,
-      middleName: memberForm.middleName,
+      middleName,
       lastName,
-      suffix: memberForm.suffix,
+      suffix,
       birthday: memberForm.birthday,
       contact: memberForm.contact,
       address: memberForm.address,
