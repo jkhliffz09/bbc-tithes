@@ -190,6 +190,24 @@ function setupAutoUpdater() {
   });
 }
 
+function formatUpdaterError(error) {
+  const raw = String(error?.message || error || 'Failed to check for updates.');
+  const lower = raw.toLowerCase();
+
+  if (lower.includes('releases.atom') && lower.includes('404')) {
+    return (
+      'Update feed not found (404).\n\n' +
+      'Possible causes:\n' +
+      '1) No GitHub Release has been published yet.\n' +
+      '2) Repository is private and updater has no access token.\n' +
+      '3) Repository owner/name in app publish config is incorrect.\n\n' +
+      'Publish a release (for example v1.0.6) with installer assets and latest.yml/latest-mac.yml.'
+    );
+  }
+
+  return raw;
+}
+
 async function importMembersTemplateFlow() {
   requirePermission('members.importTemplate');
   const selected = await dialog.showOpenDialog({
@@ -267,7 +285,7 @@ async function checkForUpdatesManual() {
     await dialog.showMessageBox({
       type: 'error',
       title: 'Update Error',
-      message: error?.message || 'Failed to check for updates.',
+      message: formatUpdaterError(error),
     });
   });
 }
