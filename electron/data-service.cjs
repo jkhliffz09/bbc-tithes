@@ -5,7 +5,7 @@ const Database = require('better-sqlite3');
 const XLSX = require('xlsx');
 
 const SERVICE_TYPES = new Set(['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']);
-const ROLE_TYPES = new Set(['Admin', 'Deacons', 'Accounting', 'Users']);
+const ROLE_TYPES = new Set(['Superadmin', 'Admin', 'Deacon', 'Accounting', 'Users', 'Deacons']);
 
 function valueToNumber(value) {
   if (value === null || value === undefined || value === '' || value === '-') {
@@ -29,9 +29,10 @@ function ensureDir(dir) {
 }
 
 function normalizeRole(role) {
-  const normalized = String(role || '').trim();
+  let normalized = String(role || '').trim();
+  if (normalized === 'Deacons') normalized = 'Deacon';
   if (!ROLE_TYPES.has(normalized)) {
-    throw new Error('Invalid role. Allowed: Admin, Deacons, Accounting, Users.');
+    throw new Error('Invalid role. Allowed: Superadmin, Admin, Deacon, Accounting, Users.');
   }
   return normalized;
 }
@@ -137,6 +138,52 @@ class DataService {
     if (!this.hasColumn('entries', 'assigned_deacon_2_user_id')) {
       this.db.exec('ALTER TABLE entries ADD COLUMN assigned_deacon_2_user_id INTEGER');
     }
+    if (!this.hasColumn('members', 'first_name')) {
+      this.db.exec('ALTER TABLE members ADD COLUMN first_name TEXT');
+    }
+    if (!this.hasColumn('members', 'middle_name')) {
+      this.db.exec('ALTER TABLE members ADD COLUMN middle_name TEXT');
+    }
+    if (!this.hasColumn('members', 'last_name')) {
+      this.db.exec('ALTER TABLE members ADD COLUMN last_name TEXT');
+    }
+    if (!this.hasColumn('members', 'suffix')) {
+      this.db.exec('ALTER TABLE members ADD COLUMN suffix TEXT');
+    }
+    this.db.exec(`UPDATE users SET role = 'Deacon' WHERE role = 'Deacons'`);
+    this.backfillMemberNameParts();
+  }
+
+  backfillMemberNameParts() {
+    const rows = this.db
+      .prepare(
+        `SELECT id, full_name AS fullName, first_name AS firstName, middle_name AS middleName, last_name AS lastName, suffix
+         FROM members`
+      )
+      .all();
+    const update = this.db.prepare(
+      `UPDATE members
+       SET first_name = @firstName,
+           middle_name = @middleName,
+           last_name = @lastName,
+           suffix = @suffix
+       WHERE id = @id`
+    );
+    for (const row of rows) {
+      const hasParts = String(row.firstName || '').trim() && String(row.lastName || '').trim();
+      if (hasParts) continue;
+      const parts = String(row.fullName || '').trim().split(/\s+/).filter(Boolean);
+      const firstName = parts[0] || '';
+      const lastName = parts.length > 1 ? parts[parts.length - 1] : '';
+      const middle = parts.length > 2 ? parts.slice(1, -1).join(' ') : '';
+      update.run({
+        id: row.id,
+        firstName: firstName || null,
+        middleName: middle || null,
+        lastName: lastName || null,
+        suffix: row.suffix || null,
+      });
+    }
   }
 
   seedDefaultUsers() {
@@ -144,6 +191,12 @@ class DataService {
     if (Number(existingCount?.count || 0) > 0) return;
 
     const seedUsers = [
+      {
+        username: 'superadmin',
+        fullName: 'System Superadmin',
+        role: 'Superadmin',
+        password: 'superadmin123',
+      },
       {
         username: 'admin',
         fullName: 'System Admin',
@@ -153,7 +206,7 @@ class DataService {
       {
         username: 'deacon',
         fullName: 'Default Deacon',
-        role: 'Deacons',
+        role: 'Deacon',
         password: 'deacon123',
       },
       {
@@ -311,7 +364,7 @@ class DataService {
            created_at AS createdAt,
            updated_at AS updatedAt
          FROM users
-         WHERE role = 'Deacons' AND is_active = 1
+         WHERE role = 'Deacon' AND is_active = 1
          ORDER BY full_name ASC`
       )
       .all()
@@ -370,7 +423,7 @@ class DataService {
     if (!id) throw new Error('User ID is required.');
 
     const existing = this.db
-      .prepare('SELECT id, username FROM users WHERE id = ?')
+      .prepare('SELECT id, username, role FROM users WHERE id = ?')
       .get(id);
 
     if (!existing) throw new Error('User not found.');
@@ -459,6 +512,33 @@ class DataService {
     return String(maxCode + 1).padStart(4, '0');
   }
 
+  fullNameFromParts(payload) {
+    const firstName = String(payload.firstName || '').trim();
+    const middleName = String(payload.middleName || '').trim();
+    const lastName = String(payload.lastName || '').trim();
+    const suffix = String(payload.suffix || '').trim();
+    const fullName = [firstName, middleName, lastName, suffix].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
+    return { firstName, middleName, lastName, suffix, fullName };
+  }
+
+  findMemberDuplicateByName({ firstName, middleName, lastName, suffix }, excludeId = null) {
+    const sql = `SELECT id FROM members
+      WHERE lower(trim(ifnull(first_name, ''))) = lower(trim(@firstName))
+        AND lower(trim(ifnull(middle_name, ''))) = lower(trim(@middleName))
+        AND lower(trim(ifnull(last_name, ''))) = lower(trim(@lastName))
+        AND lower(trim(ifnull(suffix, ''))) = lower(trim(@suffix))
+        ${excludeId ? 'AND id <> @excludeId' : ''}
+      LIMIT 1`;
+    const params = {
+      firstName: firstName || '',
+      middleName: middleName || '',
+      lastName: lastName || '',
+      suffix: suffix || '',
+      ...(excludeId ? { excludeId: Number(excludeId) } : {}),
+    };
+    return this.db.prepare(sql).get(params);
+  }
+
   validateServiceType(type) {
     if (!SERVICE_TYPES.has(type)) {
       throw new Error('Service day is invalid.');
@@ -472,6 +552,10 @@ class DataService {
           `SELECT
              id,
              member_code AS memberCode,
+             first_name AS firstName,
+             middle_name AS middleName,
+             last_name AS lastName,
+             suffix,
              full_name AS fullName,
              birthday,
              contact,
@@ -479,7 +563,7 @@ class DataService {
              created_at AS createdAt,
              updated_at AS updatedAt
            FROM members
-           WHERE full_name LIKE @q OR IFNULL(member_code, '') LIKE @q
+           WHERE full_name LIKE @q OR IFNULL(member_code, '') LIKE @q OR IFNULL(first_name, '') LIKE @q OR IFNULL(last_name, '') LIKE @q
            ORDER BY full_name ASC`
         )
         .all({ q: `%${search.trim()}%` });
@@ -490,6 +574,10 @@ class DataService {
         `SELECT
            id,
            member_code AS memberCode,
+           first_name AS firstName,
+           middle_name AS middleName,
+           last_name AS lastName,
+           suffix,
            full_name AS fullName,
            birthday,
            contact,
@@ -504,18 +592,25 @@ class DataService {
 
   createMember(payload) {
     const now = this.now();
-    const fullName = String(payload.fullName || '').trim();
-    if (!fullName) throw new Error('Member name is required.');
+    const { firstName, middleName, lastName, suffix, fullName } = this.fullNameFromParts(payload);
+    if (!firstName || !lastName) throw new Error('First name and last name are required.');
+    if (this.findMemberDuplicateByName({ firstName, middleName, lastName, suffix })) {
+      throw new Error('Member already exists.');
+    }
 
     const memberCode = String(payload.memberCode || '').trim() || this.nextMemberCode();
 
     const stmt = this.db.prepare(
-      `INSERT INTO members (member_code, full_name, birthday, contact, address, created_at, updated_at)
-       VALUES (@memberCode, @fullName, @birthday, @contact, @address, @createdAt, @updatedAt)`
+      `INSERT INTO members (member_code, first_name, middle_name, last_name, suffix, full_name, birthday, contact, address, created_at, updated_at)
+       VALUES (@memberCode, @firstName, @middleName, @lastName, @suffix, @fullName, @birthday, @contact, @address, @createdAt, @updatedAt)`
     );
 
     const result = stmt.run({
       memberCode,
+      firstName,
+      middleName: middleName || null,
+      lastName,
+      suffix: suffix || null,
       fullName,
       birthday: toDateString(payload.birthday) || null,
       contact: String(payload.contact || '').trim() || null,
@@ -533,6 +628,10 @@ class DataService {
         `SELECT
            id,
            member_code AS memberCode,
+           first_name AS firstName,
+           middle_name AS middleName,
+           last_name AS lastName,
+           suffix,
            full_name AS fullName,
            birthday,
            contact,
@@ -547,16 +646,24 @@ class DataService {
   updateMember(payload) {
     const id = Number(payload.id);
     if (!id) throw new Error('Member ID is required.');
-    const fullName = String(payload.fullName || '').trim();
-    if (!fullName) throw new Error('Member name is required.');
+    const { firstName, middleName, lastName, suffix, fullName } = this.fullNameFromParts(payload);
+    if (!firstName || !lastName) throw new Error('First name and last name are required.');
+    if (this.findMemberDuplicateByName({ firstName, middleName, lastName, suffix }, id)) {
+      throw new Error('Member already exists.');
+    }
 
-    const requestedCode = String(payload.memberCode || '').trim();
-    const memberCode = requestedCode || this.nextMemberCode();
+    const existing = this.getMemberById(id);
+    if (!existing) throw new Error('Member not found.');
+    const memberCode = String(existing.memberCode || '').trim() || this.nextMemberCode();
 
     this.db
       .prepare(
         `UPDATE members
          SET member_code = @memberCode,
+             first_name = @firstName,
+             middle_name = @middleName,
+             last_name = @lastName,
+             suffix = @suffix,
              full_name = @fullName,
              birthday = @birthday,
              contact = @contact,
@@ -567,6 +674,10 @@ class DataService {
       .run({
         id,
         memberCode,
+        firstName,
+        middleName: middleName || null,
+        lastName,
+        suffix: suffix || null,
         fullName,
         birthday: toDateString(payload.birthday) || null,
         contact: String(payload.contact || '').trim() || null,

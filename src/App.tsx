@@ -8,7 +8,10 @@ type Tab = 'members' | 'entries' | 'reports' | 'users';
 type MemberForm = {
   id?: number;
   memberCode: string;
-  fullName: string;
+  firstName: string;
+  middleName: string;
+  lastName: string;
+  suffix: string;
   birthday: string;
   contact: string;
   address: string;
@@ -55,7 +58,7 @@ type DuplicateEntryDialog = {
   };
 };
 
-const ROLE_OPTIONS: Role[] = ['Admin', 'Deacons', 'Accounting', 'Users'];
+const ROLE_OPTIONS: Role[] = ['Superadmin', 'Admin', 'Deacon', 'Accounting', 'Users'];
 
 function toISODate(d: Date): string {
   return d.toISOString().slice(0, 10);
@@ -74,7 +77,10 @@ const initialDate = toISODate(startDate);
 
 const emptyMemberForm: MemberForm = {
   memberCode: '',
-  fullName: '',
+  firstName: '',
+  middleName: '',
+  lastName: '',
+  suffix: '',
   birthday: '',
   contact: '',
   address: '',
@@ -111,21 +117,41 @@ function money(v: number): string {
 
 function normalizeRole(role: unknown): Role | null {
   const value = String(role || '').trim().toLowerCase();
+  if (value === 'superadmin') return 'Superadmin';
   if (value === 'admin') return 'Admin';
-  if (value === 'deacons' || value === 'deacon') return 'Deacons';
+  if (value === 'deacons' || value === 'deacon') return 'Deacon';
   if (value === 'accounting') return 'Accounting';
   if (value === 'users' || value === 'user') return 'Users';
   return null;
 }
 
 function requiresAdminEntryApproval(role: Role | null): boolean {
-  return role === 'Deacons' || role === 'Accounting';
+  return role === 'Deacon' || role === 'Accounting';
 }
 
 function can(roleInput: Role | string | null, action: string): boolean {
   const role = normalizeRole(roleInput);
   if (!role) return false;
   const matrix: Record<Role, Set<string>> = {
+    Superadmin: new Set([
+      'members.list',
+      'members.create',
+      'members.update',
+      'members.delete',
+      'entries.list',
+      'entries.create',
+      'entries.update',
+      'entries.delete',
+      'reports.generate',
+      'reports.export',
+      'workbook.import',
+      'workbook.export',
+      'backup.import',
+      'backup.export',
+      'members.importTemplate',
+      'users.manage',
+      'deacons.list',
+    ]),
     Admin: new Set([
       'members.list',
       'members.create',
@@ -145,7 +171,7 @@ function can(roleInput: Role | string | null, action: string): boolean {
       'users.manage',
       'deacons.list',
     ]),
-    Deacons: new Set([
+    Deacon: new Set([
       'members.list',
       'members.create',
       'entries.list',
@@ -190,6 +216,11 @@ function App() {
   const [memberSearch, setMemberSearch] = useState('');
   const [members, setMembers] = useState<Member[]>([]);
   const [memberForm, setMemberForm] = useState<MemberForm>(emptyMemberForm);
+  const [selectedMemberIds, setSelectedMemberIds] = useState<number[]>([]);
+  const [memberSort, setMemberSort] = useState<{
+    key: 'firstName' | 'middleName' | 'lastName' | 'birthday';
+    dir: 'asc' | 'desc';
+  }>({ key: 'firstName', dir: 'asc' });
 
   const [memberEntrySearch, setMemberEntrySearch] = useState('');
   const [selectedDate, setSelectedDate] = useState(initialDate);
@@ -199,10 +230,6 @@ function App() {
   const [reportRange, setReportRange] = useState({
     dateFrom: initialDate,
     dateTo: initialDate,
-  });
-  const [reportSignatory, setReportSignatory] = useState({
-    adminName: '',
-    accountingName: '',
   });
   const [reportAudit, setReportAudit] = useState({ actualMoneyOnHand: '' });
   const [report, setReport] = useState<ReportPayload | null>(null);
@@ -240,10 +267,14 @@ function App() {
     }
   }
 
-  const sortedMembers = useMemo(
-    () => members.slice().sort((a, b) => a.fullName.localeCompare(b.fullName)),
-    [members]
-  );
+  const sortedMembers = useMemo(() => {
+    const sorted = members.slice().sort((a, b) => {
+      const av = String(a[memberSort.key] || '').toLowerCase();
+      const bv = String(b[memberSort.key] || '').toLowerCase();
+      return av.localeCompare(bv);
+    });
+    return memberSort.dir === 'asc' ? sorted : sorted.reverse();
+  }, [members, memberSort]);
 
   const filteredMemberOptions = useMemo(() => {
     const q = memberEntrySearch.trim().toLowerCase();
@@ -308,7 +339,7 @@ function App() {
     }
     const role = normalizeRole(authUser?.role);
     const filters =
-      role === 'Deacons'
+      role === 'Deacon'
         ? {
             dateFrom: reportRange.dateFrom,
             dateTo: reportRange.dateFrom,
@@ -316,8 +347,8 @@ function App() {
           }
         : {
             ...reportRange,
-            adminName: reportSignatory.adminName,
-            accountingName: reportSignatory.accountingName,
+            adminName: authUser?.fullName || '',
+            accountingName: '',
             actualMoneyOnHand: amount(reportAudit.actualMoneyOnHand),
           };
     const result = await run('', () => window.faithflow.generateReport(filters));
@@ -335,13 +366,13 @@ function App() {
     if (!can(authUser?.role || null, 'reports.generate')) return;
     const role = normalizeRole(authUser?.role);
     const filters =
-      role === 'Deacons'
+      role === 'Deacon'
         ? { dateFrom: reportRange.dateFrom, dateTo: reportRange.dateFrom }
         : {
             dateFrom: reportRange.dateFrom,
             dateTo: reportRange.dateTo,
-            adminName: reportSignatory.adminName,
-            accountingName: reportSignatory.accountingName,
+            adminName: authUser?.fullName || '',
+            accountingName: '',
           };
     const data = await run('', () => window.faithflow.previewReport(filters));
     if (data) setReportPreview(data);
@@ -351,7 +382,7 @@ function App() {
     if (!can(authUser?.role || null, 'reports.generate')) return;
     const role = normalizeRole(authUser?.role);
     const filters =
-      role === 'Deacons'
+      role === 'Deacon'
         ? { dateFrom: reportRange.dateFrom, dateTo: reportRange.dateFrom }
         : { dateFrom: reportRange.dateFrom, dateTo: reportRange.dateTo };
     const data = await run('', () => window.faithflow.listGeneratedReports(filters));
@@ -440,7 +471,7 @@ function App() {
     void seedNextMemberCode();
     void loadUsers();
     void loadDeacons();
-    if (role !== 'Deacons') {
+    if (role !== 'Deacon') {
       void loadGeneratedReports();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -451,7 +482,7 @@ function App() {
     void loadGeneratedReports();
     void loadReportPreview();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [reportRange.dateFrom, reportRange.dateTo, reportSignatory.adminName, reportSignatory.accountingName, authUser?.id]);
+  }, [reportRange.dateFrom, reportRange.dateTo, authUser?.id]);
 
   useEffect(() => {
     if (deacons.length < 2) return;
@@ -466,17 +497,6 @@ function App() {
     });
   }, [deacons]);
 
-  useEffect(() => {
-    if (!authUser) return;
-    const role = normalizeRole(authUser.role);
-    if (role === 'Admin') {
-      setReportSignatory((prev) => ({ ...prev, adminName: prev.adminName || authUser.fullName }));
-    }
-    if (role === 'Accounting') {
-      setReportSignatory((prev) => ({ ...prev, accountingName: prev.accountingName || authUser.fullName }));
-    }
-  }, [authUser]);
-
   async function login(event: FormEvent) {
     event.preventDefault();
     const user = await run('Signed in.', () => window.faithflow.login(loginForm));
@@ -488,6 +508,10 @@ function App() {
   async function submitUser(event: FormEvent) {
     event.preventDefault();
     if (!can(authUser?.role || null, 'users.manage')) return;
+    if (role === 'Admin' && userForm.role === 'Superadmin') {
+      setError('Admin cannot assign Superadmin role.');
+      return;
+    }
 
     if (userForm.id) {
       await run('User updated.', () =>
@@ -508,6 +532,10 @@ function App() {
   }
 
   function editUser(user: User) {
+    if (normalizeRole(authUser?.role) === 'Admin' && normalizeRole(user.role) === 'Superadmin') {
+      setError('Admin cannot edit Superadmin.');
+      return;
+    }
     setUserForm({
       id: user.id,
       username: user.username,
@@ -520,6 +548,11 @@ function App() {
   }
 
   async function removeUser(userId: number) {
+    const target = users.find((u) => u.id === userId);
+    if (normalizeRole(authUser?.role) === 'Admin' && normalizeRole(target?.role) === 'Superadmin') {
+      setError('Admin cannot delete Superadmin.');
+      return;
+    }
     const ok = window.confirm('Delete this user?');
     if (!ok) return;
     await run('User deleted.', () => window.faithflow.deleteUser(userId));
@@ -531,14 +564,17 @@ function App() {
 
   async function submitMember(event: FormEvent) {
     event.preventDefault();
-    if (!memberForm.fullName.trim()) {
-      setError('Member full name is required.');
+    if (!memberForm.firstName.trim() || !memberForm.lastName.trim()) {
+      setError('First name and last name are required.');
       return;
     }
 
     const payload = {
       memberCode: memberForm.memberCode,
-      fullName: memberForm.fullName,
+      firstName: memberForm.firstName,
+      middleName: memberForm.middleName,
+      lastName: memberForm.lastName,
+      suffix: memberForm.suffix,
       birthday: memberForm.birthday,
       contact: memberForm.contact,
       address: memberForm.address,
@@ -553,6 +589,7 @@ function App() {
     }
 
     setMemberForm(emptyMemberForm);
+    setSelectedMemberIds([]);
     await loadMembers('');
     await seedNextMemberCode();
   }
@@ -562,6 +599,7 @@ function App() {
     if (!ok) return;
     await run('Member deleted.', () => window.faithflow.deleteMember(id));
     setMemberForm(emptyMemberForm);
+    setSelectedMemberIds((prev) => prev.filter((x) => x !== id));
     await loadMembers('');
     await loadEntries();
     await seedNextMemberCode();
@@ -571,7 +609,10 @@ function App() {
     setMemberForm({
       id: member.id,
       memberCode: member.memberCode || '',
-      fullName: member.fullName,
+      firstName: member.firstName || '',
+      middleName: member.middleName || '',
+      lastName: member.lastName || '',
+      suffix: member.suffix || '',
       birthday: member.birthday || '',
       contact: member.contact || '',
       address: member.address || '',
@@ -582,6 +623,22 @@ function App() {
   function resetMemberForm() {
     setMemberForm(emptyMemberForm);
     void seedNextMemberCode();
+  }
+
+  async function removeSelectedMembers() {
+    if (!selectedMemberIds.length) return;
+    const ok = window.confirm(`Delete ${selectedMemberIds.length} selected members and related records?`);
+    if (!ok) return;
+    for (const id of selectedMemberIds) {
+      const result = await run('', () => window.faithflow.deleteMember(id));
+      if (!result) return;
+    }
+    setSelectedMemberIds([]);
+    setMemberForm(emptyMemberForm);
+    await loadMembers('');
+    await loadEntries();
+    await seedNextMemberCode();
+    setToast('Selected members deleted.');
   }
 
   async function submitEntry(event: FormEvent) {
@@ -769,7 +826,7 @@ function App() {
     }
     const role = normalizeRole(authUser?.role);
     const filters =
-      role === 'Deacons'
+      role === 'Deacon'
         ? {
             dateFrom: reportRange.dateFrom,
             dateTo: reportRange.dateFrom,
@@ -777,13 +834,23 @@ function App() {
           }
         : {
             ...reportRange,
-            adminName: reportSignatory.adminName,
-            accountingName: reportSignatory.accountingName,
+            adminName: authUser?.fullName || '',
+            accountingName: '',
             actualMoneyOnHand: amount(reportAudit.actualMoneyOnHand),
           };
     const result = await run('', () => window.faithflow.exportReportExcel(filters));
     if (!result || result.canceled) return;
     setToast(`Report exported to ${result.path || 'selected path'}.`);
+  }
+
+  async function exportReportPdf() {
+    if (!String(reportAudit.actualMoneyOnHand).trim()) {
+      setError('Actual Money On Hand is required.');
+      return;
+    }
+    const result = await run('', () => window.faithflow.exportReportPdf());
+    if (!result || result.canceled) return;
+    setToast(`Report PDF exported to ${result.path || 'selected path'}.`);
   }
 
   function printReport() {
@@ -827,7 +894,7 @@ function App() {
   }
 
   const role = normalizeRole(authUser.role);
-  const isDeaconRole = role === 'Deacons';
+  const isDeaconRole = role === 'Deacon';
   const reportDeacon1 = reportPreview?.signatory.deacon1Name || report?.signatory.deacon1Name || '';
   const reportDeacon2 = reportPreview?.signatory.deacon2Name || report?.signatory.deacon2Name || '';
   const canEditEntries = can(role, 'entries.update') || requiresAdminEntryApproval(role);
@@ -835,6 +902,8 @@ function App() {
   const canUpdateEntryInForm = entryForm.id
     ? canEditEntries
     : can(role, 'entries.create');
+  const assignableRoles = role === 'Admin' ? ROLE_OPTIONS.filter((r) => r !== 'Superadmin') : ROLE_OPTIONS;
+  const canManageListedUser = (u: User) => !(role === 'Admin' && normalizeRole(u.role) === 'Superadmin');
 
   return (
     <div className="app-shell">
@@ -867,22 +936,51 @@ function App() {
               <h2>{memberForm.id ? 'Edit Member' : 'Add Member'}</h2>
               <form className="form" onSubmit={submitMember}>
                 <label>
-                  Member Code (auto-generated, editable)
+                  Member ID (auto-generated)
                   <input
                     value={memberForm.memberCode}
-                    onChange={(e) => setMemberForm((p) => ({ ...p, memberCode: e.target.value }))}
-                    disabled={!can(role, memberForm.id ? 'members.update' : 'members.create')}
+                    readOnly
+                    disabled
                   />
                 </label>
-                <label>
-                  Full Name *
-                  <input
-                    value={memberForm.fullName}
-                    onChange={(e) => setMemberForm((p) => ({ ...p, fullName: e.target.value }))}
-                    required
-                    disabled={!can(role, memberForm.id ? 'members.update' : 'members.create')}
-                  />
-                </label>
+                <div className="grid-inline">
+                  <label>
+                    First Name *
+                    <input
+                      value={memberForm.firstName}
+                      onChange={(e) => setMemberForm((p) => ({ ...p, firstName: e.target.value }))}
+                      required
+                      disabled={!can(role, memberForm.id ? 'members.update' : 'members.create')}
+                    />
+                  </label>
+                  <label>
+                    Last Name *
+                    <input
+                      value={memberForm.lastName}
+                      onChange={(e) => setMemberForm((p) => ({ ...p, lastName: e.target.value }))}
+                      required
+                      disabled={!can(role, memberForm.id ? 'members.update' : 'members.create')}
+                    />
+                  </label>
+                </div>
+                <div className="grid-inline">
+                  <label>
+                    Middle Name (optional)
+                    <input
+                      value={memberForm.middleName}
+                      onChange={(e) => setMemberForm((p) => ({ ...p, middleName: e.target.value }))}
+                      disabled={!can(role, memberForm.id ? 'members.update' : 'members.create')}
+                    />
+                  </label>
+                  <label>
+                    Suffix (optional)
+                    <input
+                      value={memberForm.suffix}
+                      onChange={(e) => setMemberForm((p) => ({ ...p, suffix: e.target.value }))}
+                      disabled={!can(role, memberForm.id ? 'members.update' : 'members.create')}
+                    />
+                  </label>
+                </div>
                 <label>
                   Birthday (optional)
                   <input
@@ -893,7 +991,7 @@ function App() {
                   />
                 </label>
                 <label>
-                  Contact
+                  Contact Number
                   <input
                     value={memberForm.contact}
                     onChange={(e) => setMemberForm((p) => ({ ...p, contact: e.target.value }))}
@@ -926,22 +1024,55 @@ function App() {
                   onChange={(e) => setMemberSearch(e.target.value)}
                 />
                 <button onClick={() => loadMembers(memberSearch)} disabled={busy}>Search</button>
+                <button type="button" className="secondary" onClick={removeSelectedMembers} disabled={busy || !selectedMemberIds.length}>
+                  Delete Selected
+                </button>
               </div>
               <div className="table-wrap">
                 <table>
                   <thead>
                     <tr>
-                      <th>Name</th>
-                      <th>Code</th>
-                      <th>Birthday</th>
+                      <th>
+                        <input
+                          type="checkbox"
+                          checked={sortedMembers.length > 0 && selectedMemberIds.length === sortedMembers.length}
+                          onChange={(e) =>
+                            setSelectedMemberIds(e.target.checked ? sortedMembers.map((m) => m.id) : [])
+                          }
+                        />
+                      </th>
+                      <th>
+                        <button type="button" className="tiny secondary" onClick={() => setMemberSort((prev) => ({ key: 'firstName', dir: prev.key === 'firstName' && prev.dir === 'asc' ? 'desc' : 'asc' }))}>Firstname</button>
+                      </th>
+                      <th>
+                        <button type="button" className="tiny secondary" onClick={() => setMemberSort((prev) => ({ key: 'middleName', dir: prev.key === 'middleName' && prev.dir === 'asc' ? 'desc' : 'asc' }))}>Middle</button>
+                      </th>
+                      <th>
+                        <button type="button" className="tiny secondary" onClick={() => setMemberSort((prev) => ({ key: 'lastName', dir: prev.key === 'lastName' && prev.dir === 'asc' ? 'desc' : 'asc' }))}>Lastname</button>
+                      </th>
+                      <th>
+                        <button type="button" className="tiny secondary" onClick={() => setMemberSort((prev) => ({ key: 'birthday', dir: prev.key === 'birthday' && prev.dir === 'asc' ? 'desc' : 'asc' }))}>Birthday</button>
+                      </th>
                       <th>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
                     {sortedMembers.map((member) => (
                       <tr key={member.id}>
-                        <td>{member.fullName}</td>
-                        <td>{member.memberCode || '-'}</td>
+                        <td>
+                          <input
+                            type="checkbox"
+                            checked={selectedMemberIds.includes(member.id)}
+                            onChange={(e) =>
+                              setSelectedMemberIds((prev) =>
+                                e.target.checked ? [...new Set([...prev, member.id])] : prev.filter((id) => id !== member.id)
+                              )
+                            }
+                          />
+                        </td>
+                        <td>{member.firstName || '-'}</td>
+                        <td>{member.middleName || '-'}</td>
+                        <td>{member.lastName || '-'}</td>
                         <td>{member.birthday || '-'}</td>
                         <td>
                           <div className="inline-actions">
@@ -1216,22 +1347,10 @@ function App() {
                     </label>
                   </div>
                 ) : (
-                  <div className="grid-inline">
-                    <label>
-                      Signatory Admin
-                      <input
-                        value={reportSignatory.adminName}
-                        onChange={(e) => setReportSignatory((p) => ({ ...p, adminName: e.target.value }))}
-                      />
-                    </label>
-                    <label>
-                      Signatory Accounting
-                      <input
-                        value={reportSignatory.accountingName}
-                        onChange={(e) => setReportSignatory((p) => ({ ...p, accountingName: e.target.value }))}
-                      />
-                    </label>
-                  </div>
+                  <label>
+                    Signatory
+                    <input value={authUser.fullName} readOnly />
+                  </label>
                 )}
                 <label>
                   Total Audited Amount
@@ -1255,9 +1374,12 @@ function App() {
                 </label>
                 <div className="row-actions">
                   <button onClick={generateReport} disabled={busy || !can(role, 'reports.generate')}>Generate</button>
-                  <button className="secondary" onClick={printReport}>Print</button>
+                  <button className="secondary" onClick={printReport} title="Print">🖨</button>
                   {can(role, 'reports.export') && (
-                    <button className="secondary" onClick={exportReportExcel}>Export Excel</button>
+                    <>
+                      <button className="secondary" onClick={exportReportExcel} title="Export Excel">📊</button>
+                      <button className="secondary" onClick={exportReportPdf} title="Export PDF">📄</button>
+                    </>
                   )}
                 </div>
               </div>
@@ -1371,25 +1493,19 @@ function App() {
                   </div>
 
                   <div className="signatories">
-                    {!!report.signatory.adminName && (
+                    {!isDeaconRole && (
                       <div className="signatory-line">
-                        <span>{report.signatory.adminName}</span>
-                        <small>Admin Signatory</small>
+                        <span>{authUser.fullName}</span>
+                        <small>Signatory</small>
                       </div>
                     )}
-                    {!!report.signatory.accountingName && (
-                      <div className="signatory-line">
-                        <span>{report.signatory.accountingName}</span>
-                        <small>Accounting Signatory</small>
-                      </div>
-                    )}
-                    {!!report.signatory.deacon1Name && (
+                    {isDeaconRole && !!report.signatory.deacon1Name && (
                       <div className="signatory-line">
                         <span>{report.signatory.deacon1Name}</span>
                         <small>Deacon Signatory 1</small>
                       </div>
                     )}
-                    {!!report.signatory.deacon2Name && (
+                    {isDeaconRole && !!report.signatory.deacon2Name && (
                       <div className="signatory-line">
                         <span>{report.signatory.deacon2Name}</span>
                         <small>Deacon Signatory 2</small>
@@ -1423,7 +1539,7 @@ function App() {
                 <label>
                   Role
                   <select value={userForm.role} onChange={(e) => setUserForm((p) => ({ ...p, role: e.target.value as Role }))}>
-                    {ROLE_OPTIONS.map((r) => <option key={r} value={r}>{r}</option>)}
+                    {assignableRoles.map((r) => <option key={r} value={r}>{r}</option>)}
                   </select>
                 </label>
                 <label>
@@ -1471,8 +1587,10 @@ function App() {
                         <td>{u.isActive ? 'Yes' : 'No'}</td>
                         <td>
                           <div className="inline-actions">
-                            <button type="button" className="tiny" onClick={() => editUser(u)}>Edit</button>
-                            {authUser.id !== u.id && (
+                            {canManageListedUser(u) && (
+                              <button type="button" className="tiny" onClick={() => editUser(u)}>Edit</button>
+                            )}
+                            {authUser.id !== u.id && canManageListedUser(u) && (
                               <button type="button" className="tiny danger" onClick={() => removeUser(u.id)}>Delete</button>
                             )}
                           </div>

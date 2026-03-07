@@ -1,4 +1,4 @@
-export type Role = 'Admin' | 'Deacons' | 'Accounting' | 'Users';
+export type Role = 'Superadmin' | 'Admin' | 'Deacon' | 'Accounting' | 'Users';
 
 export type ServiceType = 'Sunday' | 'Monday' | 'Tuesday' | 'Wednesday' | 'Thursday' | 'Friday' | 'Saturday';
 
@@ -15,6 +15,10 @@ export type User = {
 export type Member = {
   id: number;
   memberCode: string | null;
+  firstName: string;
+  middleName: string | null;
+  lastName: string;
+  suffix: string | null;
   fullName: string;
   birthday: string | null;
   contact: string | null;
@@ -144,6 +148,7 @@ declare global {
       getGeneratedReport: (id: number) => Promise<{ id: number; dateFrom: string; dateTo: string; createdAt: string; report: ReportPayload }>;
       deleteGeneratedReport: (id: number) => Promise<{ success: true }>;
       exportReportExcel: (filters: { dateFrom: string; dateTo: string; adminName?: string; accountingName?: string; deacon1Name?: string; deacon2Name?: string; actualMoneyOnHand?: number }) => Promise<ImportExportResult>;
+      exportReportPdf: () => Promise<ImportExportResult>;
       exportGeneratedReportExcel: (id: number) => Promise<ImportExportResult>;
       importMembersTemplate: () => Promise<ImportExportResult>;
       importAppWorkbook: () => Promise<ImportExportResult>;

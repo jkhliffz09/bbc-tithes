@@ -73,6 +73,28 @@ function can(action) {
   if (!role) return false;
 
   const matrix = {
+    Superadmin: new Set([
+      'members.list',
+      'members.create',
+      'members.update',
+      'members.delete',
+      'entries.list',
+      'entries.create',
+      'entries.update',
+      'entries.delete',
+      'reports.generate',
+      'reports.export',
+      'workbook.import',
+      'workbook.export',
+      'backup.import',
+      'backup.export',
+      'members.importTemplate',
+      'users.list',
+      'deacons.list',
+      'users.create',
+      'users.update',
+      'users.delete',
+    ]),
     Admin: new Set([
       'members.list',
       'members.create',
@@ -95,7 +117,7 @@ function can(action) {
       'users.update',
       'users.delete',
     ]),
-    Deacons: new Set([
+    Deacon: new Set([
       'members.list',
       'members.create',
       'entries.list',
@@ -140,7 +162,7 @@ function performLogout() {
 
 function requireEntryAdminApproval(payload, action, targetEntryId) {
   const role = getRole();
-  if (!['Deacons', 'Accounting'].includes(role || '')) return;
+  if (!['Deacon', 'Accounting'].includes(role || '')) return;
 
   const username = String(payload?.adminUsername || '').trim();
   const password = String(payload?.adminPassword || '');
@@ -469,6 +491,10 @@ app.whenReady().then(() => {
     'users:update',
     withErrorHandling((_event, payload) => {
       requirePermission('users.update');
+      const target = dataService.getUserById(payload?.id);
+      if (getRole() === 'Admin' && target?.role === 'Superadmin') {
+        throw new Error('Admin cannot edit Superadmin.');
+      }
       return { ok: true, data: dataService.updateUser(payload) };
     })
   );
@@ -479,6 +505,10 @@ app.whenReady().then(() => {
       requirePermission('users.delete');
       if (sessionUser?.id === Number(id)) {
         throw new Error('You cannot delete the currently signed-in user.');
+      }
+      const target = dataService.getUserById(id);
+      if (getRole() === 'Admin' && target?.role === 'Superadmin') {
+        throw new Error('Admin cannot delete Superadmin.');
       }
       return { ok: true, data: dataService.deleteUser(id) };
     })
@@ -544,7 +574,7 @@ app.whenReady().then(() => {
     'entries:update',
     withErrorHandling((_event, payload) => {
       requireAuth();
-      if (['Deacons', 'Accounting'].includes(getRole() || '')) {
+      if (['Deacon', 'Accounting'].includes(getRole() || '')) {
         requireEntryAdminApproval(payload, 'entries.update', payload?.id);
       } else {
         requirePermission('entries.update');
@@ -566,7 +596,7 @@ app.whenReady().then(() => {
     withErrorHandling((_event, payload) => {
       requireAuth();
       const entryId = payload?.id || payload;
-      if (['Deacons', 'Accounting'].includes(getRole() || '')) {
+      if (['Deacon', 'Accounting'].includes(getRole() || '')) {
         requireEntryAdminApproval(payload, 'entries.delete', entryId);
       } else {
         requirePermission('entries.delete');
@@ -581,7 +611,7 @@ app.whenReady().then(() => {
       requirePermission('reports.generate');
       const role = getRole();
       let payload = null;
-      if (role === 'Deacons') {
+      if (role === 'Deacon') {
         const selectedDate = toISODate(filters?.dateFrom || filters?.dateTo) || localTodayISO();
         payload = dataService.getReport({
           dateFrom: selectedDate,
@@ -627,7 +657,7 @@ app.whenReady().then(() => {
     withErrorHandling((_event, filters) => {
       requirePermission('reports.generate');
       const role = getRole();
-      if (role === 'Deacons') {
+      if (role === 'Deacon') {
         const selectedDate = toISODate(filters?.dateFrom || filters?.dateTo) || localTodayISO();
         return {
           ok: true,
@@ -656,7 +686,7 @@ app.whenReady().then(() => {
     withErrorHandling((_event, filters) => {
       requirePermission('reports.generate');
       const role = getRole();
-      if (role === 'Deacons') {
+      if (role === 'Deacon') {
         const selectedDate = toISODate(filters?.dateFrom || filters?.dateTo) || localTodayISO();
         return { ok: true, data: dataService.listGeneratedReports({ dateFrom: selectedDate, dateTo: selectedDate }) };
       }
@@ -695,7 +725,7 @@ app.whenReady().then(() => {
         return { ok: true, data: { canceled: true } };
       }
 
-      if (role === 'Deacons') {
+      if (role === 'Deacon') {
         const selectedDate = toISODate(filters?.dateFrom || filters?.dateTo) || localTodayISO();
         return {
           ok: true,
@@ -733,6 +763,33 @@ app.whenReady().then(() => {
         return { ok: true, data: { canceled: true } };
       }
       return { ok: true, data: dataService.exportGeneratedReportWorkbook(saved.filePath, id) };
+    })
+  );
+
+  ipcMain.handle(
+    'reports:exportPdf',
+    withErrorHandling(async () => {
+      requirePermission('reports.export');
+      const saved = await dialog.showSaveDialog({
+        title: 'Export Report PDF',
+        defaultPath: 'faithflow-report.pdf',
+        filters: [{ name: 'PDF', extensions: ['pdf'] }],
+      });
+      if (saved.canceled || !saved.filePath) {
+        return { ok: true, data: { canceled: true } };
+      }
+      if (!mainWindow || mainWindow.isDestroyed()) {
+        throw new Error('Main window is not available.');
+      }
+      const pdf = await mainWindow.webContents.printToPDF({
+        printBackground: true,
+        landscape: false,
+        margins: { top: 0.4, bottom: 0.4, left: 0.4, right: 0.4 },
+        pageSize: 'A4',
+      });
+      const fs = require('node:fs');
+      fs.writeFileSync(saved.filePath, pdf);
+      return { ok: true, data: { success: true, path: saved.filePath } };
     })
   );
 
