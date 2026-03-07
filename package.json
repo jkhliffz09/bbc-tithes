@@ -2,7 +2,7 @@
   "name": "faithflow-bbc-tithes-offerings",
   "productName": "FaithFlow - BBC Tithes and Offerings",
   "private": true,
-  "version": "1.0.13",
+  "version": "1.0.14",
   "description": "Application to record church members' tithes and offerings every Sunday and Wednesday.",
   "main": "electron/main.cjs",
   "type": "module",
@@ -73,11 +73,12 @@
         "dmg",
         "zip"
       ],
+      "artifactName": "FaithFlow-${version}-${arch}-mac.${ext}",
       "category": "public.app-category.finance",
       "icon": "build/icon.png"
     },
     "dmg": {
-      "artifactName": "${productName}-${version}-${arch}.${ext}"
+      "artifactName": "FaithFlow-${version}-${arch}.${ext}"
     },
     "win": {
       "target": [
@@ -88,7 +89,7 @@
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
-      "artifactName": "${productName}-${version}-${arch}-Setup.${ext}"
+      "artifactName": "FaithFlow-${version}-${arch}-Setup.${ext}"
     },
     "publish": [
       {
