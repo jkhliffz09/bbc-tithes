@@ -40,6 +40,21 @@ type PendingEntryAction =
   | { type: 'update'; payload: { id: number; memberId: number; serviceDate: string; serviceType: ServiceType; assignedDeacon1UserId: number; assignedDeacon2UserId: number; tithes: number; faithPromise: number; thanksgiving: number; notes: string } }
   | { type: 'delete'; entryId: number };
 
+type DuplicateEntryDialog = {
+  existing: Entry;
+  payload: {
+    memberId: number;
+    serviceDate: string;
+    serviceType: ServiceType;
+    assignedDeacon1UserId: number;
+    assignedDeacon2UserId: number;
+    tithes: number;
+    faithPromise: number;
+    thanksgiving: number;
+    notes: string;
+  };
+};
+
 const ROLE_OPTIONS: Role[] = ['Admin', 'Deacons', 'Accounting', 'Users'];
 
 function toISODate(d: Date): string {
@@ -206,6 +221,7 @@ function App() {
   } | null>(null);
   const [pendingEntryAction, setPendingEntryAction] = useState<PendingEntryAction | null>(null);
   const [adminApproval, setAdminApproval] = useState({ adminUsername: '', adminPassword: '', adminNote: '' });
+  const [duplicateDialog, setDuplicateDialog] = useState<DuplicateEntryDialog | null>(null);
 
   async function run<T>(label: string, fn: () => Promise<T>) {
     setError('');
@@ -583,6 +599,13 @@ function App() {
         window.faithflow.updateEntry({ id: entryForm.id as number, ...payload })
       );
     } else {
+      const existingRows = await run('', () => window.faithflow.listEntries({ date: entryForm.serviceDate }));
+      if (!existingRows) return;
+      const duplicate = existingRows.find((row) => row.memberId === payload.memberId);
+      if (duplicate) {
+        setDuplicateDialog({ existing: duplicate, payload });
+        return;
+      }
       await run('Giving entry recorded.', () => window.faithflow.createEntry(payload));
     }
 
@@ -595,6 +618,45 @@ function App() {
     });
     setMemberEntrySearch('');
     await loadEntries();
+  }
+
+  async function submitDuplicateUpdate(event: FormEvent) {
+    event.preventDefault();
+    if (!duplicateDialog) return;
+    const { existing, payload } = duplicateDialog;
+
+    const safePayload = {
+      id: existing.id,
+      memberId: existing.memberId,
+      serviceDate: existing.serviceDate,
+      serviceType: existing.serviceType,
+      assignedDeacon1UserId: existing.assignedDeacon1UserId || payload.assignedDeacon1UserId,
+      assignedDeacon2UserId: existing.assignedDeacon2UserId || payload.assignedDeacon2UserId,
+      tithes: existing.tithes > 0 ? existing.tithes : payload.tithes,
+      faithPromise: existing.faithPromise > 0 ? existing.faithPromise : payload.faithPromise,
+      thanksgiving: existing.thanksgiving > 0 ? existing.thanksgiving : payload.thanksgiving,
+      notes: payload.notes || existing.notes || '',
+    };
+
+    setDuplicateDialog(null);
+    if (requiresAdminEntryApproval(normalizeRole(authUser?.role))) {
+      setPendingEntryAction({ type: 'update', payload: safePayload });
+      setAdminApproval({ adminUsername: '', adminPassword: '', adminNote: '' });
+      return;
+    }
+
+    const updated = await run('Giving entry updated.', () => window.faithflow.updateEntry(safePayload));
+    if (!updated) return;
+
+    setEntryForm({
+      ...emptyEntryForm,
+      serviceDate: safePayload.serviceDate,
+      serviceType: deriveServiceTypeFromDate(safePayload.serviceDate),
+      assignedDeacon1UserId: safePayload.assignedDeacon1UserId,
+      assignedDeacon2UserId: safePayload.assignedDeacon2UserId,
+    });
+    setMemberEntrySearch('');
+    await loadEntries(safePayload.serviceDate);
   }
 
   async function removeEntry(id: number) {
@@ -1121,7 +1183,7 @@ function App() {
                   </div>
                 )}
                 {isDeaconRole ? (
-                  <div className="grid-inline">
+                  <div className="form">
                     <label>
                       Signatory Deacon 1
                       <input value={reportDeacon1} readOnly />
@@ -1180,39 +1242,24 @@ function App() {
 
               <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3">
                 <h3 className="mb-2 text-base font-semibold text-slate-700">Generated Reports</h3>
-                <div className="table-wrap">
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>Generated At</th>
-                        <th>Date From</th>
-                        <th>Date To</th>
-                        <th>Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {generatedReports.map((g) => (
-                        <tr key={g.id}>
-                          <td>{g.createdAt}</td>
-                          <td>{g.dateFrom}</td>
-                          <td>{g.dateTo}</td>
-                          <td>
-                            <div className="inline-actions">
-                              <button type="button" className="tiny" onClick={() => openGeneratedReport(g.id)}>Open</button>
-                              <button type="button" className="tiny secondary" onClick={() => exportGeneratedReport(g.id)}>Download</button>
-                              <button type="button" className="tiny secondary" onClick={() => printGeneratedReport(g.id)}>Print</button>
-                              <button type="button" className="tiny danger" onClick={() => removeGeneratedReport(g.id)}>Delete</button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                      {generatedReports.length === 0 && (
-                        <tr>
-                          <td colSpan={4} className="muted">No generated reports for the selected date filter.</td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
+                <div className="grid gap-2">
+                  {generatedReports.map((g) => (
+                    <article key={g.id} className="rounded-lg border border-slate-200 bg-white p-2.5">
+                      <p className="text-sm text-slate-700">
+                        {g.dateFrom === g.dateTo ? g.dateFrom : `${g.dateFrom} to ${g.dateTo}`}
+                      </p>
+                      <p className="muted">Generated: {g.createdAt}</p>
+                      <div className="inline-actions mt-2">
+                        <button type="button" className="tiny" onClick={() => openGeneratedReport(g.id)}>Open</button>
+                        <button type="button" className="tiny secondary" onClick={() => exportGeneratedReport(g.id)}>Download</button>
+                        <button type="button" className="tiny secondary" onClick={() => printGeneratedReport(g.id)}>Print</button>
+                        <button type="button" className="tiny danger" onClick={() => removeGeneratedReport(g.id)}>Delete</button>
+                      </div>
+                    </article>
+                  ))}
+                  {generatedReports.length === 0 && (
+                    <p className="muted">No generated reports for the selected date filter.</p>
+                  )}
                 </div>
               </div>
             </article>
@@ -1417,6 +1464,125 @@ function App() {
           </section>
         )}
       </main>
+      {duplicateDialog && (
+        <div className="modal-backdrop" role="presentation">
+          <section className="modal-card">
+            <h3>Entry Already Exists</h3>
+            <p className="muted">
+              This member already has an entry for {duplicateDialog.existing.serviceDate}. Update the empty fields only.
+            </p>
+            <form className="form" onSubmit={submitDuplicateUpdate}>
+              <label>
+                Tithes
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={String(
+                    duplicateDialog.existing.tithes > 0
+                      ? duplicateDialog.existing.tithes
+                      : duplicateDialog.payload.tithes
+                  )}
+                  disabled={duplicateDialog.existing.tithes > 0}
+                  onChange={(e) =>
+                    setDuplicateDialog((prev) =>
+                      prev
+                        ? {
+                            ...prev,
+                            payload: {
+                              ...prev.payload,
+                              tithes: Number(e.target.value || 0),
+                            },
+                          }
+                        : prev
+                    )
+                  }
+                />
+              </label>
+              <label>
+                Faith Promise
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={String(
+                    duplicateDialog.existing.faithPromise > 0
+                      ? duplicateDialog.existing.faithPromise
+                      : duplicateDialog.payload.faithPromise
+                  )}
+                  disabled={duplicateDialog.existing.faithPromise > 0}
+                  onChange={(e) =>
+                    setDuplicateDialog((prev) =>
+                      prev
+                        ? {
+                            ...prev,
+                            payload: {
+                              ...prev.payload,
+                              faithPromise: Number(e.target.value || 0),
+                            },
+                          }
+                        : prev
+                    )
+                  }
+                />
+              </label>
+              <label>
+                Thanksgiving
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={String(
+                    duplicateDialog.existing.thanksgiving > 0
+                      ? duplicateDialog.existing.thanksgiving
+                      : duplicateDialog.payload.thanksgiving
+                  )}
+                  disabled={duplicateDialog.existing.thanksgiving > 0}
+                  onChange={(e) =>
+                    setDuplicateDialog((prev) =>
+                      prev
+                        ? {
+                            ...prev,
+                            payload: {
+                              ...prev.payload,
+                              thanksgiving: Number(e.target.value || 0),
+                            },
+                          }
+                        : prev
+                    )
+                  }
+                />
+              </label>
+              <label>
+                Notes
+                <textarea
+                  rows={2}
+                  value={duplicateDialog.payload.notes}
+                  onChange={(e) =>
+                    setDuplicateDialog((prev) =>
+                      prev
+                        ? {
+                            ...prev,
+                            payload: {
+                              ...prev.payload,
+                              notes: e.target.value,
+                            },
+                          }
+                        : prev
+                    )
+                  }
+                />
+              </label>
+              <div className="row-actions">
+                <button type="submit" disabled={busy}>Update Entry</button>
+                <button type="button" className="secondary" onClick={() => setDuplicateDialog(null)}>
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </section>
+        </div>
+      )}
       {pendingEntryAction && (
         <div className="modal-backdrop" role="presentation">
           <section className="modal-card">

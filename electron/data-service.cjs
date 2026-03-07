@@ -657,58 +657,6 @@ class DataService {
 
     this.validateServiceType(payload.serviceType);
 
-    const existing = this.db
-      .prepare(
-        `SELECT
-           id,
-           tithes,
-           faith_promise AS faithPromise,
-           loose_offerings AS looseOfferings,
-           thanksgiving,
-           notes
-         FROM entries
-         WHERE member_id = @memberId AND service_date = @serviceDate
-         LIMIT 1`
-      )
-      .get({ memberId, serviceDate });
-
-    if (existing) {
-      const incomingNotes = String(payload.notes || '').trim();
-      const existingNotes = String(existing.notes || '').trim();
-      const mergedNotes = existingNotes && incomingNotes
-        ? `${existingNotes}\n${incomingNotes}`
-        : existingNotes || incomingNotes || null;
-
-      this.db
-        .prepare(
-          `UPDATE entries
-           SET service_type = @serviceType,
-               assigned_deacon_1_user_id = @assignedDeacon1UserId,
-               assigned_deacon_2_user_id = @assignedDeacon2UserId,
-               tithes = @tithes,
-               faith_promise = @faithPromise,
-               loose_offerings = @looseOfferings,
-               thanksgiving = @thanksgiving,
-               notes = @notes,
-               updated_at = @updatedAt
-           WHERE id = @id`
-        )
-        .run({
-          id: existing.id,
-          serviceType: payload.serviceType,
-          assignedDeacon1UserId,
-          assignedDeacon2UserId,
-          tithes: valueToNumber(existing.tithes) + valueToNumber(payload.tithes),
-          faithPromise: valueToNumber(existing.faithPromise) + valueToNumber(payload.faithPromise),
-          looseOfferings: valueToNumber(existing.looseOfferings) + valueToNumber(payload.looseOfferings),
-          thanksgiving: valueToNumber(existing.thanksgiving) + valueToNumber(payload.thanksgiving),
-          notes: mergedNotes,
-          updatedAt: now,
-        });
-
-      return this.getEntryById(existing.id);
-    }
-
     const stmt = this.db.prepare(
       `INSERT INTO entries
       (member_id, service_date, service_type, assigned_deacon_1_user_id, assigned_deacon_2_user_id, tithes, faith_promise, loose_offerings, thanksgiving, notes, created_at, updated_at)
