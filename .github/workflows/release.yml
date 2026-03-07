@@ -26,8 +26,6 @@ jobs:
 
       - name: Build macOS installers
         run: npm run dist:mac
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload macOS artifacts
         uses: softprops/action-gh-release@v2
@@ -37,7 +35,7 @@ jobs:
             release/*.dmg.blockmap
             release/*.zip
             release/*.zip.blockmap
-            release/latest-mac.yml
+            release/latest-mac*.yml
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -58,8 +56,6 @@ jobs:
 
       - name: Build Windows installers
         run: npm run dist:win
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload Windows artifacts
         uses: softprops/action-gh-release@v2
@@ -67,6 +63,6 @@ jobs:
           files: |
             release/*Setup.exe
             release/*Setup.exe.blockmap
-            release/latest.yml
+            release/latest*.yml
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
