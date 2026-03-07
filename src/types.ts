@@ -30,6 +30,10 @@ export type Entry = {
   memberCode: string | null;
   serviceDate: string;
   serviceType: ServiceType;
+  assignedDeacon1UserId: number | null;
+  assignedDeacon1Name: string | null;
+  assignedDeacon2UserId: number | null;
+  assignedDeacon2Name: string | null;
   tithes: number;
   faithPromise: number;
   looseOfferings: number;
@@ -61,6 +65,12 @@ export type ReportSummary = {
 export type ReportPayload = {
   dateFrom: string;
   dateTo: string;
+  signatory: {
+    adminName: string;
+    accountingName: string;
+    deacon1Name: string;
+    deacon2Name: string;
+  };
   rows: ReportRow[];
   summary: ReportSummary;
 };
@@ -85,6 +95,7 @@ declare global {
       currentUser: () => Promise<User | null>;
 
       listUsers: () => Promise<User[]>;
+      listDeacons: () => Promise<User[]>;
       createUser: (payload: {
         username: string;
         fullName: string;
@@ -112,8 +123,8 @@ declare global {
       updateEntry: (payload: Partial<Entry> & { id: number; adminUsername?: string; adminPassword?: string; adminNote?: string }) => Promise<Entry>;
       deleteEntry: (payload: { id: number; adminUsername?: string; adminPassword?: string; adminNote?: string } | number) => Promise<{ success: true }>;
 
-      generateReport: (filters: { dateFrom: string; dateTo: string }) => Promise<ReportPayload>;
-      exportReportExcel: (filters: { dateFrom: string; dateTo: string }) => Promise<ImportExportResult>;
+      generateReport: (filters: { dateFrom: string; dateTo: string; adminName?: string; accountingName?: string; deacon1Name?: string; deacon2Name?: string }) => Promise<ReportPayload>;
+      exportReportExcel: (filters: { dateFrom: string; dateTo: string; adminName?: string; accountingName?: string; deacon1Name?: string; deacon2Name?: string }) => Promise<ImportExportResult>;
       importMembersTemplate: () => Promise<ImportExportResult>;
       importAppWorkbook: () => Promise<ImportExportResult>;
       exportAppWorkbook: () => Promise<ImportExportResult>;

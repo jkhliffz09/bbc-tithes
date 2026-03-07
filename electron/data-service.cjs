@@ -79,6 +79,8 @@ class DataService {
         member_id INTEGER NOT NULL,
         service_date TEXT NOT NULL,
         service_type TEXT NOT NULL,
+        assigned_deacon_1_user_id INTEGER,
+        assigned_deacon_2_user_id INTEGER,
         tithes REAL NOT NULL DEFAULT 0,
         faith_promise REAL NOT NULL DEFAULT 0,
         loose_offerings REAL NOT NULL DEFAULT 0,
@@ -119,6 +121,12 @@ class DataService {
 
     if (!this.hasColumn('members', 'birthday')) {
       this.db.exec('ALTER TABLE members ADD COLUMN birthday TEXT');
+    }
+    if (!this.hasColumn('entries', 'assigned_deacon_1_user_id')) {
+      this.db.exec('ALTER TABLE entries ADD COLUMN assigned_deacon_1_user_id INTEGER');
+    }
+    if (!this.hasColumn('entries', 'assigned_deacon_2_user_id')) {
+      this.db.exec('ALTER TABLE entries ADD COLUMN assigned_deacon_2_user_id INTEGER');
     }
   }
 
@@ -279,6 +287,25 @@ class DataService {
          ORDER BY id ASC`
       )
       .all();
+  }
+
+  listDeacons() {
+    return this.db
+      .prepare(
+        `SELECT
+           id,
+           username,
+           full_name AS fullName,
+           role,
+           is_active AS isActive,
+           created_at AS createdAt,
+           updated_at AS updatedAt
+         FROM users
+         WHERE role = 'Deacons' AND is_active = 1
+         ORDER BY full_name ASC`
+      )
+      .all()
+      .map((u) => this.sanitizeUser(u));
   }
 
   createUser(payload) {
@@ -575,6 +602,10 @@ class DataService {
            m.member_code AS memberCode,
            e.service_date AS serviceDate,
            e.service_type AS serviceType,
+           e.assigned_deacon_1_user_id AS assignedDeacon1UserId,
+           d1.full_name AS assignedDeacon1Name,
+           e.assigned_deacon_2_user_id AS assignedDeacon2UserId,
+           d2.full_name AS assignedDeacon2Name,
            e.tithes,
            e.faith_promise AS faithPromise,
            e.loose_offerings AS looseOfferings,
@@ -584,6 +615,8 @@ class DataService {
            e.updated_at AS updatedAt
          FROM entries e
          INNER JOIN members m ON m.id = e.member_id
+         LEFT JOIN users d1 ON d1.id = e.assigned_deacon_1_user_id
+         LEFT JOIN users d2 ON d2.id = e.assigned_deacon_2_user_id
          ${where}
          ORDER BY e.service_date DESC, m.full_name ASC`
       )
@@ -597,20 +630,30 @@ class DataService {
 
     const serviceDate = toDateString(payload.serviceDate);
     if (!serviceDate) throw new Error('Service date is required.');
+    const assignedDeacon1UserId = Number(payload.assignedDeacon1UserId);
+    const assignedDeacon2UserId = Number(payload.assignedDeacon2UserId);
+    if (!assignedDeacon1UserId || !assignedDeacon2UserId) {
+      throw new Error('Two assigned deacons are required.');
+    }
+    if (assignedDeacon1UserId === assignedDeacon2UserId) {
+      throw new Error('Assigned deacons must be two different users.');
+    }
 
     this.validateServiceType(payload.serviceType);
 
     const stmt = this.db.prepare(
       `INSERT INTO entries
-      (member_id, service_date, service_type, tithes, faith_promise, loose_offerings, thanksgiving, notes, created_at, updated_at)
+      (member_id, service_date, service_type, assigned_deacon_1_user_id, assigned_deacon_2_user_id, tithes, faith_promise, loose_offerings, thanksgiving, notes, created_at, updated_at)
       VALUES
-      (@memberId, @serviceDate, @serviceType, @tithes, @faithPromise, @looseOfferings, @thanksgiving, @notes, @createdAt, @updatedAt)`
+      (@memberId, @serviceDate, @serviceType, @assignedDeacon1UserId, @assignedDeacon2UserId, @tithes, @faithPromise, @looseOfferings, @thanksgiving, @notes, @createdAt, @updatedAt)`
     );
 
     const result = stmt.run({
       memberId,
       serviceDate,
       serviceType: payload.serviceType,
+      assignedDeacon1UserId,
+      assignedDeacon2UserId,
       tithes: valueToNumber(payload.tithes),
       faithPromise: valueToNumber(payload.faithPromise),
       looseOfferings: valueToNumber(payload.looseOfferings),
@@ -633,6 +676,10 @@ class DataService {
            m.member_code AS memberCode,
            e.service_date AS serviceDate,
            e.service_type AS serviceType,
+           e.assigned_deacon_1_user_id AS assignedDeacon1UserId,
+           d1.full_name AS assignedDeacon1Name,
+           e.assigned_deacon_2_user_id AS assignedDeacon2UserId,
+           d2.full_name AS assignedDeacon2Name,
            e.tithes,
            e.faith_promise AS faithPromise,
            e.loose_offerings AS looseOfferings,
@@ -642,6 +689,8 @@ class DataService {
            e.updated_at AS updatedAt
          FROM entries e
          INNER JOIN members m ON m.id = e.member_id
+         LEFT JOIN users d1 ON d1.id = e.assigned_deacon_1_user_id
+         LEFT JOIN users d2 ON d2.id = e.assigned_deacon_2_user_id
          WHERE e.id = ?`
       )
       .get(id);
@@ -654,6 +703,14 @@ class DataService {
     if (!memberId) throw new Error('Member is required.');
     const serviceDate = toDateString(payload.serviceDate);
     if (!serviceDate) throw new Error('Service date is required.');
+    const assignedDeacon1UserId = Number(payload.assignedDeacon1UserId);
+    const assignedDeacon2UserId = Number(payload.assignedDeacon2UserId);
+    if (!assignedDeacon1UserId || !assignedDeacon2UserId) {
+      throw new Error('Two assigned deacons are required.');
+    }
+    if (assignedDeacon1UserId === assignedDeacon2UserId) {
+      throw new Error('Assigned deacons must be two different users.');
+    }
 
     this.validateServiceType(payload.serviceType);
 
@@ -663,6 +720,8 @@ class DataService {
          SET member_id = @memberId,
              service_date = @serviceDate,
              service_type = @serviceType,
+             assigned_deacon_1_user_id = @assignedDeacon1UserId,
+             assigned_deacon_2_user_id = @assignedDeacon2UserId,
              tithes = @tithes,
              faith_promise = @faithPromise,
              loose_offerings = @looseOfferings,
@@ -676,6 +735,8 @@ class DataService {
         memberId,
         serviceDate,
         serviceType: payload.serviceType,
+        assignedDeacon1UserId,
+        assignedDeacon2UserId,
         tithes: valueToNumber(payload.tithes),
         faithPromise: valueToNumber(payload.faithPromise),
         looseOfferings: valueToNumber(payload.looseOfferings),
@@ -730,10 +791,18 @@ class DataService {
       )
       .get({ dateFrom, dateTo });
 
+    const signatory = {
+      adminName: String(filters.adminName || '').trim(),
+      accountingName: String(filters.accountingName || '').trim(),
+      deacon1Name: String(filters.deacon1Name || '').trim(),
+      deacon2Name: String(filters.deacon2Name || '').trim(),
+    };
+
     return {
       dateFrom,
       dateTo,
       rows,
+      signatory,
       summary: {
         tithes: valueToNumber(summary?.tithes),
         faithPromise: valueToNumber(summary?.faithPromise),
@@ -766,6 +835,10 @@ class DataService {
       {
         DateFrom: report.dateFrom,
         DateTo: report.dateTo,
+        SignatoryAdmin: report.signatory.adminName,
+        SignatoryAccounting: report.signatory.accountingName,
+        SignatoryDeacon1: report.signatory.deacon1Name,
+        SignatoryDeacon2: report.signatory.deacon2Name,
         Tithes: report.summary.tithes,
         FaithPromise: report.summary.faithPromise,
         LooseOfferings: report.summary.looseOfferings,
@@ -810,6 +883,8 @@ class DataService {
         MemberCode: e.memberCode || '',
         ServiceDate: e.serviceDate,
         ServiceType: e.serviceType,
+        AssignedDeacon1: e.assignedDeacon1Name || '',
+        AssignedDeacon2: e.assignedDeacon2Name || '',
         Tithes: e.tithes,
         FaithPromise: e.faithPromise,
         LooseOfferings: e.looseOfferings,
@@ -856,6 +931,8 @@ class DataService {
            member_id AS memberId,
            service_date AS serviceDate,
            service_type AS serviceType,
+           assigned_deacon_1_user_id AS assignedDeacon1UserId,
+           assigned_deacon_2_user_id AS assignedDeacon2UserId,
            tithes,
            faith_promise AS faithPromise,
            loose_offerings AS looseOfferings,
@@ -938,9 +1015,9 @@ class DataService {
       );
       const insertEntry = this.db.prepare(
         `INSERT INTO entries
-        (id, member_id, service_date, service_type, tithes, faith_promise, loose_offerings, thanksgiving, notes, created_at, updated_at)
+        (id, member_id, service_date, service_type, assigned_deacon_1_user_id, assigned_deacon_2_user_id, tithes, faith_promise, loose_offerings, thanksgiving, notes, created_at, updated_at)
         VALUES
-        (@id, @memberId, @serviceDate, @serviceType, @tithes, @faithPromise, @looseOfferings, @thanksgiving, @notes, @createdAt, @updatedAt)`
+        (@id, @memberId, @serviceDate, @serviceType, @assignedDeacon1UserId, @assignedDeacon2UserId, @tithes, @faithPromise, @looseOfferings, @thanksgiving, @notes, @createdAt, @updatedAt)`
       );
       const insertUser = this.db.prepare(
         `INSERT INTO users
@@ -976,6 +1053,8 @@ class DataService {
           memberId: Number(e.memberId),
           serviceDate: toDateString(e.serviceDate),
           serviceType,
+          assignedDeacon1UserId: e.assignedDeacon1UserId ? Number(e.assignedDeacon1UserId) : null,
+          assignedDeacon2UserId: e.assignedDeacon2UserId ? Number(e.assignedDeacon2UserId) : null,
           tithes: valueToNumber(e.tithes),
           faithPromise: valueToNumber(e.faithPromise),
           looseOfferings: valueToNumber(e.looseOfferings),
@@ -1072,10 +1151,17 @@ class DataService {
 
       const insertEntry = this.db.prepare(
         `INSERT INTO entries
-        (member_id, service_date, service_type, tithes, faith_promise, loose_offerings, thanksgiving, notes, created_at, updated_at)
+        (member_id, service_date, service_type, assigned_deacon_1_user_id, assigned_deacon_2_user_id, tithes, faith_promise, loose_offerings, thanksgiving, notes, created_at, updated_at)
         VALUES
-        (@memberId, @serviceDate, @serviceType, @tithes, @faithPromise, @looseOfferings, @thanksgiving, @notes, @createdAt, @updatedAt)`
+        (@memberId, @serviceDate, @serviceType, @assignedDeacon1UserId, @assignedDeacon2UserId, @tithes, @faithPromise, @looseOfferings, @thanksgiving, @notes, @createdAt, @updatedAt)`
       );
+
+      const deacons = this.listDeacons();
+      const deaconByName = new Map();
+      for (const d of deacons) {
+        deaconByName.set(String(d.fullName || '').trim().toLowerCase(), d.id);
+        deaconByName.set(String(d.username || '').trim().toLowerCase(), d.id);
+      }
 
       for (const row of entries) {
         const memberName = String(row.MemberName || '').trim();
@@ -1094,6 +1180,8 @@ class DataService {
           memberId,
           serviceDate,
           serviceType,
+          assignedDeacon1UserId: deaconByName.get(String(row.AssignedDeacon1 || '').trim().toLowerCase()) || null,
+          assignedDeacon2UserId: deaconByName.get(String(row.AssignedDeacon2 || '').trim().toLowerCase()) || null,
           tithes: valueToNumber(row.Tithes),
           faithPromise: valueToNumber(row.FaithPromise),
           looseOfferings: valueToNumber(row.LooseOfferings),

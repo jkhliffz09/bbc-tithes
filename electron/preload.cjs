@@ -14,6 +14,7 @@ contextBridge.exposeInMainWorld('faithflow', {
   currentUser: () => invoke('auth:currentUser'),
 
   listUsers: () => invoke('users:list'),
+  listDeacons: () => invoke('users:listDeacons'),
   createUser: (payload) => invoke('users:create', payload),
   updateUser: (payload) => invoke('users:update', payload),
   deleteUser: (id) => invoke('users:delete', id),

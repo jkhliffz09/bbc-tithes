@@ -53,6 +53,14 @@ function requireAuth() {
   if (!sessionUser) throw new Error('Please sign in first.');
 }
 
+function localTodayISO() {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  const d = String(now.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
 function can(action) {
   const role = getRole();
   if (!role) return false;
@@ -75,6 +83,7 @@ function can(action) {
       'backup.export',
       'members.importTemplate',
       'users.list',
+      'deacons.list',
       'users.create',
       'users.update',
       'users.delete',
@@ -86,6 +95,7 @@ function can(action) {
       'entries.create',
       'reports.generate',
       'reports.export',
+      'deacons.list',
     ]),
     Accounting: new Set([
       'members.list',
@@ -95,6 +105,7 @@ function can(action) {
       'entries.delete',
       'reports.generate',
       'reports.export',
+      'deacons.list',
       'workbook.import',
       'workbook.export',
       'backup.import',
@@ -398,6 +409,14 @@ app.whenReady().then(() => {
   );
 
   ipcMain.handle(
+    'users:listDeacons',
+    withErrorHandling(() => {
+      requirePermission('deacons.list');
+      return { ok: true, data: dataService.listDeacons() };
+    })
+  );
+
+  ipcMain.handle(
     'users:create',
     withErrorHandling((_event, payload) => {
       requirePermission('users.create');
@@ -511,7 +530,34 @@ app.whenReady().then(() => {
     'reports:generate',
     withErrorHandling((_event, filters) => {
       requirePermission('reports.generate');
-      return { ok: true, data: dataService.getReport(filters) };
+      const role = getRole();
+      if (role === 'Deacons') {
+        const today = localTodayISO();
+        const deacon1Name = String(filters?.deacon1Name || '').trim();
+        const deacon2Name = String(filters?.deacon2Name || '').trim();
+        if (!deacon1Name || !deacon2Name) {
+          throw new Error('Both assigned deacon signatories are required.');
+        }
+        return {
+          ok: true,
+          data: dataService.getReport({
+            dateFrom: today,
+            dateTo: today,
+            deacon1Name,
+            deacon2Name,
+          }),
+        };
+      }
+
+      return {
+        ok: true,
+        data: dataService.getReport({
+          dateFrom: filters?.dateFrom,
+          dateTo: filters?.dateTo,
+          adminName: String(filters?.adminName || '').trim(),
+          accountingName: String(filters?.accountingName || '').trim(),
+        }),
+      };
     })
   );
 
@@ -519,6 +565,7 @@ app.whenReady().then(() => {
     'reports:exportExcel',
     withErrorHandling(async (_event, filters) => {
       requirePermission('reports.export');
+      const role = getRole();
       const saved = await dialog.showSaveDialog({
         title: 'Export Report Excel',
         defaultPath: 'faithflow-report.xlsx',
@@ -529,7 +576,33 @@ app.whenReady().then(() => {
         return { ok: true, data: { canceled: true } };
       }
 
-      return { ok: true, data: dataService.exportReportWorkbook(saved.filePath, filters) };
+      if (role === 'Deacons') {
+        const today = localTodayISO();
+        const deacon1Name = String(filters?.deacon1Name || '').trim();
+        const deacon2Name = String(filters?.deacon2Name || '').trim();
+        if (!deacon1Name || !deacon2Name) {
+          throw new Error('Both assigned deacon signatories are required.');
+        }
+        return {
+          ok: true,
+          data: dataService.exportReportWorkbook(saved.filePath, {
+            dateFrom: today,
+            dateTo: today,
+            deacon1Name,
+            deacon2Name,
+          }),
+        };
+      }
+
+      return {
+        ok: true,
+        data: dataService.exportReportWorkbook(saved.filePath, {
+          dateFrom: filters?.dateFrom,
+          dateTo: filters?.dateTo,
+          adminName: String(filters?.adminName || '').trim(),
+          accountingName: String(filters?.accountingName || '').trim(),
+        }),
+      };
     })
   );
 

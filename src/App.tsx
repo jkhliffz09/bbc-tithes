@@ -19,6 +19,8 @@ type EntryForm = {
   memberId: number;
   serviceDate: string;
   serviceType: ServiceType;
+  assignedDeacon1UserId: number;
+  assignedDeacon2UserId: number;
   tithes: string;
   faithPromise: string;
   looseOfferings: string;
@@ -36,13 +38,21 @@ type UserForm = {
 };
 
 type PendingEntryAction =
-  | { type: 'update'; payload: { id: number; memberId: number; serviceDate: string; serviceType: ServiceType; tithes: number; faithPromise: number; looseOfferings: number; thanksgiving: number; notes: string } }
+  | { type: 'update'; payload: { id: number; memberId: number; serviceDate: string; serviceType: ServiceType; assignedDeacon1UserId: number; assignedDeacon2UserId: number; tithes: number; faithPromise: number; looseOfferings: number; thanksgiving: number; notes: string } }
   | { type: 'delete'; entryId: number };
 
 const ROLE_OPTIONS: Role[] = ['Admin', 'Deacons', 'Accounting', 'Users'];
 
 function toISODate(d: Date): string {
   return d.toISOString().slice(0, 10);
+}
+
+function localTodayISO(): string {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  const d = String(now.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
 }
 
 function nearestPastServiceDate(baseDate: Date): Date {
@@ -85,6 +95,8 @@ const emptyEntryForm: EntryForm = {
   memberId: 0,
   serviceDate: initialDate,
   serviceType: deriveServiceTypeFromDate(initialDate),
+  assignedDeacon1UserId: 0,
+  assignedDeacon2UserId: 0,
   tithes: '0',
   faithPromise: '0',
   looseOfferings: '0',
@@ -143,6 +155,7 @@ function can(roleInput: Role | string | null, action: string): boolean {
       'backup.export',
       'members.importTemplate',
       'users.manage',
+      'deacons.list',
     ]),
     Deacons: new Set([
       'members.list',
@@ -151,6 +164,7 @@ function can(roleInput: Role | string | null, action: string): boolean {
       'entries.create',
       'reports.generate',
       'reports.export',
+      'deacons.list',
     ]),
     Accounting: new Set([
       'members.list',
@@ -160,6 +174,7 @@ function can(roleInput: Role | string | null, action: string): boolean {
       'entries.delete',
       'reports.generate',
       'reports.export',
+      'deacons.list',
       'workbook.import',
       'workbook.export',
       'backup.import',
@@ -182,6 +197,7 @@ function App() {
 
   const [users, setUsers] = useState<User[]>([]);
   const [userForm, setUserForm] = useState<UserForm>(emptyUserForm);
+  const [deacons, setDeacons] = useState<User[]>([]);
 
   const [memberSearch, setMemberSearch] = useState('');
   const [members, setMembers] = useState<Member[]>([]);
@@ -195,6 +211,10 @@ function App() {
   const [reportRange, setReportRange] = useState({
     dateFrom: `${startDate.getFullYear()}-01-01`,
     dateTo: initialDate,
+  });
+  const [reportSignatory, setReportSignatory] = useState({
+    adminName: '',
+    accountingName: '',
   });
   const [report, setReport] = useState<ReportPayload | null>(null);
   const [pendingEntryAction, setPendingEntryAction] = useState<PendingEntryAction | null>(null);
@@ -259,6 +279,12 @@ function App() {
     if (data) setUsers(data);
   }
 
+  async function loadDeacons() {
+    if (!can(authUser?.role || null, 'deacons.list')) return;
+    const data = await run('', () => window.faithflow.listDeacons());
+    if (data) setDeacons(data);
+  }
+
   async function loadMembers(search = memberSearch) {
     if (!can(authUser?.role || null, 'members.list')) return;
     const data = await run('', () => window.faithflow.listMembers(search));
@@ -273,7 +299,27 @@ function App() {
 
   async function generateReport() {
     if (!can(authUser?.role || null, 'reports.generate')) return;
-    const payload = await run('', () => window.faithflow.generateReport(reportRange));
+    const role = normalizeRole(authUser?.role);
+    const deacon1 = deacons.find((d) => d.id === entryForm.assignedDeacon1UserId);
+    const deacon2 = deacons.find((d) => d.id === entryForm.assignedDeacon2UserId);
+    if (role === 'Deacons' && (!deacon1 || !deacon2)) {
+      setError('Select two assigned deacons in Giving Entries before generating report.');
+      return;
+    }
+    const filters =
+      role === 'Deacons'
+        ? {
+            dateFrom: localTodayISO(),
+            dateTo: localTodayISO(),
+            deacon1Name: deacon1?.fullName || '',
+            deacon2Name: deacon2?.fullName || '',
+          }
+        : {
+            ...reportRange,
+            adminName: reportSignatory.adminName,
+            accountingName: reportSignatory.accountingName,
+          };
+    const payload = await run('', () => window.faithflow.generateReport(filters));
     if (payload) setReport(payload);
   }
 
@@ -298,6 +344,7 @@ function App() {
       setEntries([]);
       setReport(null);
       setUsers([]);
+      setDeacons([]);
       setMemberEntrySearch('');
       setToast('');
       setError('');
@@ -307,13 +354,41 @@ function App() {
 
   useEffect(() => {
     if (!authUser) return;
+    const role = normalizeRole(authUser.role);
     void loadMembers('');
     void loadEntries(initialMonth);
-    void generateReport();
+    if (role !== 'Deacons') {
+      void generateReport();
+    }
     void seedNextMemberCode();
     void loadUsers();
+    void loadDeacons();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authUser?.id]);
+
+  useEffect(() => {
+    if (deacons.length < 2) return;
+    setEntryForm((prev) => {
+      const d1 = prev.assignedDeacon1UserId || deacons[0].id;
+      let d2 = prev.assignedDeacon2UserId || deacons[1].id;
+      if (d1 === d2) {
+        const next = deacons.find((d) => d.id !== d1);
+        d2 = next ? next.id : d2;
+      }
+      return { ...prev, assignedDeacon1UserId: d1, assignedDeacon2UserId: d2 };
+    });
+  }, [deacons]);
+
+  useEffect(() => {
+    if (!authUser) return;
+    const role = normalizeRole(authUser.role);
+    if (role === 'Admin') {
+      setReportSignatory((prev) => ({ ...prev, adminName: prev.adminName || authUser.fullName }));
+    }
+    if (role === 'Accounting') {
+      setReportSignatory((prev) => ({ ...prev, accountingName: prev.accountingName || authUser.fullName }));
+    }
+  }, [authUser]);
 
   async function login(event: FormEvent) {
     event.preventDefault();
@@ -428,11 +503,21 @@ function App() {
       setError('Please select a member from autocomplete results.');
       return;
     }
+    if (!entryForm.assignedDeacon1UserId || !entryForm.assignedDeacon2UserId) {
+      setError('Please assign two deacons.');
+      return;
+    }
+    if (entryForm.assignedDeacon1UserId === entryForm.assignedDeacon2UserId) {
+      setError('Assigned deacons must be two different users.');
+      return;
+    }
 
     const payload = {
       memberId: entryForm.memberId,
       serviceDate: entryForm.serviceDate,
       serviceType: deriveServiceTypeFromDate(entryForm.serviceDate),
+      assignedDeacon1UserId: entryForm.assignedDeacon1UserId,
+      assignedDeacon2UserId: entryForm.assignedDeacon2UserId,
       tithes: amount(entryForm.tithes),
       faithPromise: amount(entryForm.faithPromise),
       looseOfferings: amount(entryForm.looseOfferings),
@@ -457,6 +542,8 @@ function App() {
       ...emptyEntryForm,
       serviceDate: entryForm.serviceDate,
       serviceType: deriveServiceTypeFromDate(entryForm.serviceDate),
+      assignedDeacon1UserId: entryForm.assignedDeacon1UserId,
+      assignedDeacon2UserId: entryForm.assignedDeacon2UserId,
     });
     setMemberEntrySearch('');
     await loadEntries();
@@ -474,7 +561,12 @@ function App() {
     }
     await run('Giving entry deleted.', () => window.faithflow.deleteEntry({ id }));
 
-    setEntryForm({ ...emptyEntryForm, serviceDate: initialDate });
+    setEntryForm({
+      ...emptyEntryForm,
+      serviceDate: initialDate,
+      assignedDeacon1UserId: entryForm.assignedDeacon1UserId,
+      assignedDeacon2UserId: entryForm.assignedDeacon2UserId,
+    });
     setMemberEntrySearch('');
     await loadEntries();
     await generateReport();
@@ -502,6 +594,8 @@ function App() {
         ...emptyEntryForm,
         serviceDate: pendingEntryAction.payload.serviceDate,
         serviceType: deriveServiceTypeFromDate(pendingEntryAction.payload.serviceDate),
+        assignedDeacon1UserId: pendingEntryAction.payload.assignedDeacon1UserId,
+        assignedDeacon2UserId: pendingEntryAction.payload.assignedDeacon2UserId,
       });
       setMemberEntrySearch('');
     } else {
@@ -514,7 +608,12 @@ function App() {
         })
       );
       if (!deleted) return;
-      setEntryForm({ ...emptyEntryForm, serviceDate: initialDate });
+      setEntryForm({
+        ...emptyEntryForm,
+        serviceDate: initialDate,
+        assignedDeacon1UserId: entryForm.assignedDeacon1UserId,
+        assignedDeacon2UserId: entryForm.assignedDeacon2UserId,
+      });
       setMemberEntrySearch('');
     }
 
@@ -532,6 +631,8 @@ function App() {
       memberId: entry.memberId,
       serviceDate: entry.serviceDate,
       serviceType: entry.serviceType,
+      assignedDeacon1UserId: entry.assignedDeacon1UserId || 0,
+      assignedDeacon2UserId: entry.assignedDeacon2UserId || 0,
       tithes: String(entry.tithes || 0),
       faithPromise: String(entry.faithPromise || 0),
       looseOfferings: String(entry.looseOfferings || 0),
@@ -542,7 +643,27 @@ function App() {
   }
 
   async function exportReportExcel() {
-    const result = await run('', () => window.faithflow.exportReportExcel(reportRange));
+    const role = normalizeRole(authUser?.role);
+    const deacon1 = deacons.find((d) => d.id === entryForm.assignedDeacon1UserId);
+    const deacon2 = deacons.find((d) => d.id === entryForm.assignedDeacon2UserId);
+    if (role === 'Deacons' && (!deacon1 || !deacon2)) {
+      setError('Select two assigned deacons in Giving Entries before exporting report.');
+      return;
+    }
+    const filters =
+      role === 'Deacons'
+        ? {
+            dateFrom: localTodayISO(),
+            dateTo: localTodayISO(),
+            deacon1Name: deacon1?.fullName || '',
+            deacon2Name: deacon2?.fullName || '',
+          }
+        : {
+            ...reportRange,
+            adminName: reportSignatory.adminName,
+            accountingName: reportSignatory.accountingName,
+          };
+    const result = await run('', () => window.faithflow.exportReportExcel(filters));
     if (!result || result.canceled) return;
     setToast(`Report exported to ${result.path || 'selected path'}.`);
   }
@@ -587,6 +708,9 @@ function App() {
   }
 
   const role = normalizeRole(authUser.role);
+  const isDeaconRole = role === 'Deacons';
+  const reportDeacon1 = deacons.find((d) => d.id === entryForm.assignedDeacon1UserId)?.fullName || '';
+  const reportDeacon2 = deacons.find((d) => d.id === entryForm.assignedDeacon2UserId)?.fullName || '';
   const canEditEntries = can(role, 'entries.update') || requiresAdminEntryApproval(role);
   const canDeleteEntries = can(role, 'entries.delete') || requiresAdminEntryApproval(role);
   const canUpdateEntryInForm = entryForm.id
@@ -761,6 +885,39 @@ function App() {
 
                 <div className="grid-inline">
                   <label>
+                    Assigned Deacon 1 *
+                    <select
+                      value={entryForm.assignedDeacon1UserId || ''}
+                      onChange={(e) => setEntryForm((p) => ({ ...p, assignedDeacon1UserId: Number(e.target.value || 0) }))}
+                      required
+                    >
+                      <option value="">Select deacon</option>
+                      {deacons.map((d) => (
+                        <option key={d.id} value={d.id}>
+                          {d.fullName}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    Assigned Deacon 2 *
+                    <select
+                      value={entryForm.assignedDeacon2UserId || ''}
+                      onChange={(e) => setEntryForm((p) => ({ ...p, assignedDeacon2UserId: Number(e.target.value || 0) }))}
+                      required
+                    >
+                      <option value="">Select deacon</option>
+                      {deacons.map((d) => (
+                        <option key={d.id} value={d.id}>
+                          {d.fullName}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+
+                <div className="grid-inline">
+                  <label>
                     Date *
                     <input
                       type="date"
@@ -821,6 +978,8 @@ function App() {
                         ...emptyEntryForm,
                         serviceDate: initialDate,
                         serviceType: deriveServiceTypeFromDate(initialDate),
+                        assignedDeacon1UserId: entryForm.assignedDeacon1UserId,
+                        assignedDeacon2UserId: entryForm.assignedDeacon2UserId,
                       });
                       setMemberEntrySearch('');
                     }}
@@ -862,6 +1021,7 @@ function App() {
                       <th>Date</th>
                       <th>Service</th>
                       <th>Member</th>
+                      <th>Assigned Deacons</th>
                       <th>Total</th>
                       <th>Actions</th>
                     </tr>
@@ -874,6 +1034,7 @@ function App() {
                           <td>{entry.serviceDate}</td>
                           <td>{entry.serviceType}</td>
                           <td>{entry.memberName}</td>
+                          <td>{entry.assignedDeacon1Name || '-'} / {entry.assignedDeacon2Name || '-'}</td>
                           <td>{money(total)}</td>
                           <td>
                             <div className="inline-actions">
@@ -898,12 +1059,51 @@ function App() {
               <div className="report-actions">
                 <label>
                   From
-                  <input type="date" value={reportRange.dateFrom} onChange={(e) => setReportRange((p) => ({ ...p, dateFrom: e.target.value }))} />
+                  <input
+                    type="date"
+                    value={isDeaconRole ? localTodayISO() : reportRange.dateFrom}
+                    onChange={(e) => setReportRange((p) => ({ ...p, dateFrom: e.target.value }))}
+                    disabled={isDeaconRole}
+                  />
                 </label>
                 <label>
                   To
-                  <input type="date" value={reportRange.dateTo} onChange={(e) => setReportRange((p) => ({ ...p, dateTo: e.target.value }))} />
+                  <input
+                    type="date"
+                    value={isDeaconRole ? localTodayISO() : reportRange.dateTo}
+                    onChange={(e) => setReportRange((p) => ({ ...p, dateTo: e.target.value }))}
+                    disabled={isDeaconRole}
+                  />
                 </label>
+                {isDeaconRole ? (
+                  <>
+                    <label>
+                      Signatory Deacon 1
+                      <input value={reportDeacon1} readOnly />
+                    </label>
+                    <label>
+                      Signatory Deacon 2
+                      <input value={reportDeacon2} readOnly />
+                    </label>
+                  </>
+                ) : (
+                  <>
+                    <label>
+                      Signatory Admin
+                      <input
+                        value={reportSignatory.adminName}
+                        onChange={(e) => setReportSignatory((p) => ({ ...p, adminName: e.target.value }))}
+                      />
+                    </label>
+                    <label>
+                      Signatory Accounting
+                      <input
+                        value={reportSignatory.accountingName}
+                        onChange={(e) => setReportSignatory((p) => ({ ...p, accountingName: e.target.value }))}
+                      />
+                    </label>
+                  </>
+                )}
                 <button onClick={generateReport} disabled={busy || !can(role, 'reports.generate')}>Generate</button>
                 <button className="secondary" onClick={printReport}>Print</button>
                 {can(role, 'reports.export') && (
@@ -918,6 +1118,10 @@ function App() {
                   <h3>Bible Baptist Church</h3>
                   <p>FaithFlow Giving Report</p>
                   <p>{report.dateFrom} to {report.dateTo}</p>
+                  {!!report.signatory.adminName && <p>Admin Signatory: {report.signatory.adminName}</p>}
+                  {!!report.signatory.accountingName && <p>Accounting Signatory: {report.signatory.accountingName}</p>}
+                  {!!report.signatory.deacon1Name && <p>Deacon Signatory 1: {report.signatory.deacon1Name}</p>}
+                  {!!report.signatory.deacon2Name && <p>Deacon Signatory 2: {report.signatory.deacon2Name}</p>}
                 </header>
 
                 <div className="table-wrap">
