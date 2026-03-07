@@ -46,39 +46,15 @@ function toISODate(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
 
-function localTodayISO(): string {
-  const now = new Date();
-  const y = now.getFullYear();
-  const m = String(now.getMonth() + 1).padStart(2, '0');
-  const d = String(now.getDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
-}
-
-function nearestPastServiceDate(baseDate: Date): Date {
-  const d = new Date(baseDate);
-  d.setHours(0, 0, 0, 0);
-
-  const sunday = new Date(d);
-  sunday.setDate(d.getDate() - d.getDay());
-
-  const wednesday = new Date(d);
-  const daysSinceWednesday = (d.getDay() + 4) % 7;
-  wednesday.setDate(d.getDate() - daysSinceWednesday);
-
-  return sunday.getTime() >= wednesday.getTime() ? sunday : wednesday;
-}
-
 function deriveServiceTypeFromDate(dateStr: string): ServiceType {
+  const names: ServiceType[] = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
   const d = new Date(`${dateStr}T00:00:00`);
-  const day = d.getDay();
-  if (day === 0) return 'Sunday';
-  if (day === 3) return 'Wednesday';
-
-  const nearest = nearestPastServiceDate(d);
-  return nearest.getDay() === 0 ? 'Sunday' : 'Wednesday';
+  const day = Number.isNaN(d.getTime()) ? new Date().getDay() : d.getDay();
+  return names[day];
 }
 
-const startDate = nearestPastServiceDate(new Date());
+const startDate = new Date();
+startDate.setHours(0, 0, 0, 0);
 const initialDate = toISODate(startDate);
 
 const emptyMemberForm: MemberForm = {
@@ -297,19 +273,11 @@ function App() {
   async function generateReport() {
     if (!can(authUser?.role || null, 'reports.generate')) return;
     const role = normalizeRole(authUser?.role);
-    const deacon1 = deacons.find((d) => d.id === entryForm.assignedDeacon1UserId);
-    const deacon2 = deacons.find((d) => d.id === entryForm.assignedDeacon2UserId);
-    if (role === 'Deacons' && (!deacon1 || !deacon2)) {
-      setError('Select two assigned deacons in Giving Entries before generating report.');
-      return;
-    }
     const filters =
       role === 'Deacons'
         ? {
-            dateFrom: localTodayISO(),
-            dateTo: localTodayISO(),
-            deacon1Name: deacon1?.fullName || '',
-            deacon2Name: deacon2?.fullName || '',
+            dateFrom: reportRange.dateFrom,
+            dateTo: reportRange.dateFrom,
             actualMoneyOnHand: amount(reportAudit.actualMoneyOnHand),
           }
         : {
@@ -641,19 +609,11 @@ function App() {
 
   async function exportReportExcel() {
     const role = normalizeRole(authUser?.role);
-    const deacon1 = deacons.find((d) => d.id === entryForm.assignedDeacon1UserId);
-    const deacon2 = deacons.find((d) => d.id === entryForm.assignedDeacon2UserId);
-    if (role === 'Deacons' && (!deacon1 || !deacon2)) {
-      setError('Select two assigned deacons in Giving Entries before exporting report.');
-      return;
-    }
     const filters =
       role === 'Deacons'
         ? {
-            dateFrom: localTodayISO(),
-            dateTo: localTodayISO(),
-            deacon1Name: deacon1?.fullName || '',
-            deacon2Name: deacon2?.fullName || '',
+            dateFrom: reportRange.dateFrom,
+            dateTo: reportRange.dateFrom,
             actualMoneyOnHand: amount(reportAudit.actualMoneyOnHand),
           }
         : {
@@ -708,8 +668,8 @@ function App() {
 
   const role = normalizeRole(authUser.role);
   const isDeaconRole = role === 'Deacons';
-  const reportDeacon1 = deacons.find((d) => d.id === entryForm.assignedDeacon1UserId)?.fullName || '';
-  const reportDeacon2 = deacons.find((d) => d.id === entryForm.assignedDeacon2UserId)?.fullName || '';
+  const reportDeacon1 = report?.signatory.deacon1Name || '';
+  const reportDeacon2 = report?.signatory.deacon2Name || '';
   const canEditEntries = can(role, 'entries.update') || requiresAdminEntryApproval(role);
   const canDeleteEntries = can(role, 'entries.delete') || requiresAdminEntryApproval(role);
   const canUpdateEntryInForm = entryForm.id
@@ -1049,24 +1009,37 @@ function App() {
             <div className="split-header">
               <h2>Printable Report</h2>
               <div className="report-actions">
-                <label>
-                  From
-                  <input
-                    type="date"
-                    value={isDeaconRole ? localTodayISO() : reportRange.dateFrom}
-                    onChange={(e) => setReportRange((p) => ({ ...p, dateFrom: e.target.value }))}
-                    disabled={isDeaconRole}
-                  />
-                </label>
-                <label>
-                  To
-                  <input
-                    type="date"
-                    value={isDeaconRole ? localTodayISO() : reportRange.dateTo}
-                    onChange={(e) => setReportRange((p) => ({ ...p, dateTo: e.target.value }))}
-                    disabled={isDeaconRole}
-                  />
-                </label>
+                {isDeaconRole ? (
+                  <label>
+                    Date
+                    <input
+                      type="date"
+                      value={reportRange.dateFrom}
+                      onChange={(e) =>
+                        setReportRange((p) => ({ ...p, dateFrom: e.target.value, dateTo: e.target.value }))
+                      }
+                    />
+                  </label>
+                ) : (
+                  <>
+                    <label>
+                      From
+                      <input
+                        type="date"
+                        value={reportRange.dateFrom}
+                        onChange={(e) => setReportRange((p) => ({ ...p, dateFrom: e.target.value }))}
+                      />
+                    </label>
+                    <label>
+                      To
+                      <input
+                        type="date"
+                        value={reportRange.dateTo}
+                        onChange={(e) => setReportRange((p) => ({ ...p, dateTo: e.target.value }))}
+                      />
+                    </label>
+                  </>
+                )}
                 {isDeaconRole ? (
                   <>
                     <label>
@@ -1129,7 +1102,7 @@ function App() {
                 <header className="print-header">
                   <h3>Bible Baptist Church</h3>
                   <p>FaithFlow Giving Report</p>
-                  <p>{report.dateFrom} to {report.dateTo}</p>
+                  <p>{report.dateFrom === report.dateTo ? report.dateFrom : `${report.dateFrom} to ${report.dateTo}`}</p>
                 </header>
 
                 <div className="table-wrap">
@@ -1140,7 +1113,6 @@ function App() {
                         <th>Member</th>
                         <th>Tithes</th>
                         <th>Faith Promise</th>
-                        <th>Thanksgiving</th>
                         <th>Total</th>
                       </tr>
                     </thead>
@@ -1151,7 +1123,6 @@ function App() {
                           <td>{row.memberName}</td>
                           <td>{money(row.tithes)}</td>
                           <td>{money(row.faithPromise)}</td>
-                          <td>{money(row.thanksgiving)}</td>
                           <td>{money(row.total)}</td>
                         </tr>
                       ))}
@@ -1162,12 +1133,47 @@ function App() {
                         <th>Grand Total</th>
                         <th>{money(report.summary.tithes)}</th>
                         <th>{money(report.summary.faithPromise)}</th>
-                        <th>{money(report.summary.thanksgiving)}</th>
                         <th>{money(report.summary.total)}</th>
                       </tr>
                     </tfoot>
                   </table>
                 </div>
+                <section className="thanksgiving-page">
+                  <header className="print-header">
+                    <h3>Bible Baptist Church</h3>
+                    <p>Thanksgiving Report</p>
+                    <p>{report.dateFrom === report.dateTo ? report.dateFrom : `${report.dateFrom} to ${report.dateTo}`}</p>
+                  </header>
+                  <div className="table-wrap">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Code</th>
+                          <th>Member</th>
+                          <th>Thanksgiving</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {report.rows
+                          .filter((row) => row.thanksgiving !== 0)
+                          .map((row) => (
+                            <tr key={`thanks-${row.memberId}`}>
+                              <td>{row.memberCode || '-'}</td>
+                              <td>{row.memberName}</td>
+                              <td>{money(row.thanksgiving)}</td>
+                            </tr>
+                          ))}
+                      </tbody>
+                      <tfoot>
+                        <tr>
+                          <th></th>
+                          <th>Total Thanksgiving</th>
+                          <th>{money(report.summary.thanksgiving)}</th>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+                </section>
                 <div className="totals">
                   <div>Total Audited Amount: {money(report.summary.auditedAmount)}</div>
                   <div>Actual Money On Hand: {money(report.summary.actualMoneyOnHand)}</div>

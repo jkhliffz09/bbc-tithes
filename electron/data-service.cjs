@@ -4,7 +4,7 @@ const path = require('node:path');
 const Database = require('better-sqlite3');
 const XLSX = require('xlsx');
 
-const SERVICE_TYPES = new Set(['Sunday', 'Wednesday']);
+const SERVICE_TYPES = new Set(['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']);
 const ROLE_TYPES = new Set(['Admin', 'Deacons', 'Accounting', 'Users']);
 
 function valueToNumber(value) {
@@ -451,7 +451,7 @@ class DataService {
 
   validateServiceType(type) {
     if (!SERVICE_TYPES.has(type)) {
-      throw new Error('Service type must be Sunday or Wednesday.');
+      throw new Error('Service day is invalid.');
     }
   }
 
@@ -761,6 +761,36 @@ class DataService {
     return { success: true };
   }
 
+  inferDeaconSignatories(dateFrom, dateTo) {
+    const rows = this.db
+      .prepare(
+        `SELECT
+           x.userId,
+           u.full_name AS fullName,
+           COUNT(*) AS count
+         FROM (
+           SELECT assigned_deacon_1_user_id AS userId
+           FROM entries
+           WHERE service_date BETWEEN @dateFrom AND @dateTo
+           UNION ALL
+           SELECT assigned_deacon_2_user_id AS userId
+           FROM entries
+           WHERE service_date BETWEEN @dateFrom AND @dateTo
+         ) x
+         INNER JOIN users u ON u.id = x.userId
+         WHERE x.userId IS NOT NULL
+         GROUP BY x.userId, u.full_name
+         ORDER BY count DESC, u.full_name ASC
+         LIMIT 2`
+      )
+      .all({ dateFrom, dateTo });
+
+    return {
+      deacon1Name: String(rows?.[0]?.fullName || '').trim(),
+      deacon2Name: String(rows?.[1]?.fullName || '').trim(),
+    };
+  }
+
   getReport(filters = {}) {
     const dateFrom = toDateString(filters.dateFrom) || '1900-01-01';
     const dateTo = toDateString(filters.dateTo) || '2999-12-31';
@@ -806,6 +836,12 @@ class DataService {
       deacon2Name: String(filters.deacon2Name || '').trim(),
     };
 
+    if (!signatory.deacon1Name || !signatory.deacon2Name) {
+      const inferred = this.inferDeaconSignatories(dateFrom, dateTo);
+      if (!signatory.deacon1Name) signatory.deacon1Name = inferred.deacon1Name;
+      if (!signatory.deacon2Name) signatory.deacon2Name = inferred.deacon2Name;
+    }
+
     return {
       dateFrom,
       dateTo,
@@ -835,9 +871,17 @@ class DataService {
         MemberName: row.memberName,
         Tithes: row.tithes,
         FaithPromise: row.faithPromise,
-        Thanksgiving: row.thanksgiving,
         Total: row.total,
       }))
+    );
+    const thanksgivingSheet = XLSX.utils.json_to_sheet(
+      report.rows
+        .filter((row) => valueToNumber(row.thanksgiving) !== 0)
+        .map((row) => ({
+          MemberCode: row.memberCode || '',
+          MemberName: row.memberName,
+          Thanksgiving: row.thanksgiving,
+        }))
     );
 
     const summarySheet = XLSX.utils.json_to_sheet([
@@ -863,6 +907,7 @@ class DataService {
 
     XLSX.utils.book_append_sheet(wb, summarySheet, 'Summary');
     XLSX.utils.book_append_sheet(wb, detailSheet, 'Details');
+    XLSX.utils.book_append_sheet(wb, thanksgivingSheet, 'Thanksgiving');
     XLSX.utils.book_append_sheet(wb, signatoriesSheet, 'Signatories');
     XLSX.writeFile(wb, targetPath);
 

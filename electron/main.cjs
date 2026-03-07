@@ -61,6 +61,13 @@ function localTodayISO() {
   return `${y}-${m}-${d}`;
 }
 
+function toISODate(value) {
+  if (!value) return '';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toISOString().slice(0, 10);
+}
+
 function can(action) {
   const role = getRole();
   if (!role) return false;
@@ -539,19 +546,12 @@ app.whenReady().then(() => {
       requirePermission('reports.generate');
       const role = getRole();
       if (role === 'Deacons') {
-        const today = localTodayISO();
-        const deacon1Name = String(filters?.deacon1Name || '').trim();
-        const deacon2Name = String(filters?.deacon2Name || '').trim();
-        if (!deacon1Name || !deacon2Name) {
-          throw new Error('Both assigned deacon signatories are required.');
-        }
+        const selectedDate = toISODate(filters?.dateFrom || filters?.dateTo) || localTodayISO();
         return {
           ok: true,
           data: dataService.getReport({
-            dateFrom: today,
-            dateTo: today,
-            deacon1Name,
-            deacon2Name,
+            dateFrom: selectedDate,
+            dateTo: selectedDate,
             actualMoneyOnHand: Number(filters?.actualMoneyOnHand || 0),
           }),
         };
@@ -586,19 +586,12 @@ app.whenReady().then(() => {
       }
 
       if (role === 'Deacons') {
-        const today = localTodayISO();
-        const deacon1Name = String(filters?.deacon1Name || '').trim();
-        const deacon2Name = String(filters?.deacon2Name || '').trim();
-        if (!deacon1Name || !deacon2Name) {
-          throw new Error('Both assigned deacon signatories are required.');
-        }
+        const selectedDate = toISODate(filters?.dateFrom || filters?.dateTo) || localTodayISO();
         return {
           ok: true,
           data: dataService.exportReportWorkbook(saved.filePath, {
-            dateFrom: today,
-            dateTo: today,
-            deacon1Name,
-            deacon2Name,
+            dateFrom: selectedDate,
+            dateTo: selectedDate,
             actualMoneyOnHand: Number(filters?.actualMoneyOnHand || 0),
           }),
         };

@@ -1,6 +1,6 @@
 export type Role = 'Admin' | 'Deacons' | 'Accounting' | 'Users';
 
-export type ServiceType = 'Sunday' | 'Wednesday';
+export type ServiceType = 'Sunday' | 'Monday' | 'Tuesday' | 'Wednesday' | 'Thursday' | 'Friday' | 'Saturday';
 
 export type User = {
   id: number;

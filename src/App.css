@@ -304,6 +304,10 @@ tfoot th {
   color: var(--subtle);
 }
 
+.thanksgiving-page {
+  margin-top: 24px;
+}
+
 .autocomplete-list {
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -387,6 +391,11 @@ tfoot th {
   .status,
   .report-actions {
     display: none !important;
+  }
+
+  .thanksgiving-page {
+    page-break-before: always;
+    break-before: page;
   }
 
   .signatory-line small {
