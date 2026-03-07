@@ -1602,42 +1602,64 @@ class DataService {
     if (!sourcePath) throw new Error('Import path is required.');
 
     const wb = XLSX.readFile(sourcePath, { cellDates: true });
-    const names = new Set();
-
+    const allRows = [];
     for (const name of wb.SheetNames) {
       const ws = wb.Sheets[name];
-      const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+      const rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
+      allRows.push(...rows);
+    }
 
-      for (let i = 6; i < rows.length; i += 1) {
-        const raw = rows[i]?.[0];
-        const fullName = String(raw || '').trim();
-        if (!fullName || /^(total|church members)$/i.test(fullName)) continue;
-        if (/^\d+$/.test(fullName)) continue;
-        names.add(fullName);
+    function normalizeHeader(value) {
+      return String(value || '')
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, '');
+    }
+
+    function pick(row, aliases) {
+      const targetSet = new Set(aliases.map(normalizeHeader));
+      for (const [key, value] of Object.entries(row || {})) {
+        if (targetSet.has(normalizeHeader(key))) {
+          return value;
+        }
       }
+      return '';
     }
 
     const now = this.now();
     const insert = this.db.prepare(
-      `INSERT INTO members (member_code, full_name, birthday, contact, address, created_at, updated_at)
-       VALUES (@memberCode, @fullName, @birthday, @contact, @address, @createdAt, @updatedAt)`
+      `INSERT INTO members (member_code, first_name, middle_name, last_name, suffix, full_name, birthday, contact, address, created_at, updated_at)
+       VALUES (@memberCode, @firstName, @middleName, @lastName, @suffix, @fullName, @birthday, @contact, @address, @createdAt, @updatedAt)`
     );
-
-    const exists = this.db.prepare('SELECT id FROM members WHERE lower(full_name) = lower(?)');
 
     let imported = 0;
     const tx = this.db.transaction(() => {
-      for (const fullName of names) {
-        if (exists.get(fullName)) continue;
+      const seenInFile = new Set();
+      for (const row of allRows) {
+        const firstName = String(pick(row, ['First Name', 'Firstname', 'FirstName'])).trim();
+        const middleName = String(pick(row, ['Middle Name', 'Middlename', 'MiddleName'])).trim();
+        const lastName = String(pick(row, ['Last Name', 'Lastname', 'LastName'])).trim();
+        const suffix = String(pick(row, ['Suffix'])).trim();
+        if (!firstName || !lastName) continue;
+        const duplicateKey = `${firstName.toLowerCase()}|${middleName.toLowerCase()}|${lastName.toLowerCase()}|${suffix.toLowerCase()}`;
+        if (seenInFile.has(duplicateKey)) continue;
+        if (this.findMemberDuplicateByName({ firstName, middleName, lastName, suffix })) continue;
+        const fullName = [firstName, middleName, lastName, suffix].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
+        if (!fullName) continue;
         insert.run({
           memberCode: this.nextMemberCode(),
+          firstName,
+          middleName: middleName || null,
+          lastName,
+          suffix: suffix || null,
           fullName,
-          birthday: null,
-          contact: null,
-          address: null,
+          birthday: toDateString(pick(row, ['Birthday', 'Birth Date', 'Date of Birth'])) || null,
+          contact: String(pick(row, ['Contact Number', 'Contact', 'Phone', 'Mobile'])).trim() || null,
+          address: String(pick(row, ['Address'])).trim() || null,
           createdAt: now,
           updatedAt: now,
         });
+        seenInFile.add(duplicateKey);
         imported += 1;
       }
     });

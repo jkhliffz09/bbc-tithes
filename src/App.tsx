@@ -1397,8 +1397,8 @@ function App() {
         )}
 
         {tab === 'reports' && (
-          <section className="grid gap-4 lg:grid-cols-[360px_1fr]">
-            <article className="rounded-xl border border-slate-200 bg-white p-4">
+          <section className="report-layout grid gap-4 lg:grid-cols-[360px_1fr]">
+            <article className="report-sidebar rounded-xl border border-slate-200 bg-white p-4">
               <h2 className="mb-3 text-lg font-semibold text-slate-800">Printable Report</h2>
               <div className="form">
                 {isDeaconRole ? (
@@ -1505,9 +1505,9 @@ function App() {
               </div>
             </article>
 
-            <article className="rounded-xl border border-slate-200 bg-white p-4">
+            <article className="report-content-panel rounded-xl border border-slate-200 bg-white p-4">
               {report && (
-                <div className="report-print">
+                <div className="report-print print-target">
                   <header className="print-header">
                     <h3>Bible Baptist Church</h3>
                     <p>FaithFlow Giving Report</p>

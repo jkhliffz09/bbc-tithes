@@ -277,10 +277,36 @@ tfoot th {
 }
 
 @media print {
+  body * {
+    visibility: hidden !important;
+  }
+
+  .report-content-panel,
+  .report-content-panel * {
+    visibility: visible !important;
+  }
+
+  .report-content-panel {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    border: none !important;
+    background: #fff !important;
+    padding: 0 !important;
+  }
+
+  .report-content-panel .table-wrap {
+    max-height: none;
+    overflow: visible;
+    border: none;
+  }
+
+  .report-sidebar,
   .topbar,
   .tabs,
   .status,
-  .report-actions {
+  .modal-backdrop {
     display: none !important;
   }
 
@@ -299,7 +325,8 @@ tfoot th {
   }
 
   .panel,
-  .table-wrap {
+  .table-wrap,
+  .content {
     border: none;
   }
 }
