@@ -121,6 +121,8 @@ function can(role: Role | null, action: string): boolean {
       'reports.export',
       'workbook.import',
       'workbook.export',
+      'backup.import',
+      'backup.export',
       'members.importTemplate',
       'users.manage',
     ]),
@@ -142,6 +144,8 @@ function can(role: Role | null, action: string): boolean {
       'reports.export',
       'workbook.import',
       'workbook.export',
+      'backup.import',
+      'backup.export',
     ]),
     Users: new Set(['members.list', 'entries.list', 'reports.generate']),
   };
@@ -411,11 +415,12 @@ function App() {
     };
 
     if (entryForm.id) {
-      let override: { adminUsername?: string; adminPassword?: string } = {};
-      if (authUser?.role === 'Deacons') {
-        const adminUsername = window.prompt('Admin username required for editing this entry:') || '';
-        const adminPassword = window.prompt('Admin password:') || '';
-        override = { adminUsername, adminPassword };
+      let override: { adminUsername?: string; adminPassword?: string; adminNote?: string } = {};
+      if (authUser?.role === 'Deacons' || authUser?.role === 'Accounting') {
+        const adminUsername = window.prompt('Admin username required:') || '';
+        const adminPassword = window.prompt('Admin password required:') || '';
+        const adminNote = window.prompt('Security note (reason for edit):') || '';
+        override = { adminUsername, adminPassword, adminNote };
       }
       await run('Giving entry updated.', () =>
         window.faithflow.updateEntry({ id: entryForm.id as number, ...payload, ...override })
@@ -438,11 +443,12 @@ function App() {
     const ok = window.confirm('Delete this giving entry?');
     if (!ok) return;
 
-    if (authUser?.role === 'Deacons') {
-      const adminUsername = window.prompt('Admin username required for deleting this entry:') || '';
-      const adminPassword = window.prompt('Admin password:') || '';
+    if (authUser?.role === 'Deacons' || authUser?.role === 'Accounting') {
+      const adminUsername = window.prompt('Admin username required:') || '';
+      const adminPassword = window.prompt('Admin password required:') || '';
+      const adminNote = window.prompt('Security note (reason for delete):') || '';
       await run('Giving entry deleted.', () =>
-        window.faithflow.deleteEntry({ id, adminUsername, adminPassword })
+        window.faithflow.deleteEntry({ id, adminUsername, adminPassword, adminNote })
       );
     } else {
       await run('Giving entry deleted.', () => window.faithflow.deleteEntry({ id }));
@@ -493,6 +499,28 @@ function App() {
     const result = await run('', () => window.faithflow.exportAppWorkbook());
     if (!result || result.canceled) return;
     setToast(`Workbook exported to ${result.path || 'selected path'}.`);
+  }
+
+  async function exportFullBackup() {
+    const result = await run('', () => window.faithflow.exportFullBackup());
+    if (!result || result.canceled) return;
+    setToast(`Full backup exported to ${result.path || 'selected path'}.`);
+  }
+
+  async function importFullBackup() {
+    const ok = window.confirm(
+      'Importing full backup will REPLACE current members, entries, users, and approvals. Continue?'
+    );
+    if (!ok) return;
+    const result = await run('', () => window.faithflow.importFullBackup());
+    if (!result || result.canceled) return;
+    setToast(
+      `Full backup imported: ${result.memberCount ?? 0} members, ${result.entryCount ?? 0} entries, ${result.userCount ?? 0} users.`
+    );
+    await loadMembers('');
+    await loadEntries();
+    await generateReport();
+    await loadUsers();
   }
 
   async function exportReportExcel() {
@@ -564,6 +592,12 @@ function App() {
           )}
           {can(role, 'workbook.export') && (
             <button onClick={exportWorkbook} disabled={busy}>Export Workbook</button>
+          )}
+          {can(role, 'backup.export') && (
+            <button onClick={exportFullBackup} disabled={busy}>Export Full Backup</button>
+          )}
+          {can(role, 'backup.import') && (
+            <button onClick={importFullBackup} disabled={busy}>Import Full Backup</button>
           )}
           <button className="secondary" onClick={logout}>Logout</button>
         </div>
@@ -842,7 +876,7 @@ function App() {
                           <td>
                             <div className="inline-actions">
                               {(can(role, 'entries.update') || role === 'Deacons') && <button className="tiny" onClick={() => editEntry(entry)}>Edit</button>}
-                              {can(role, 'entries.delete') && <button className="tiny danger" onClick={() => removeEntry(entry.id)}>Delete</button>}
+                              {(can(role, 'entries.delete') || role === 'Deacons') && <button className="tiny danger" onClick={() => removeEntry(entry.id)}>Delete</button>}
                             </div>
                           </td>
                         </tr>

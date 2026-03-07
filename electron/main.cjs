@@ -1,5 +1,5 @@
 const path = require('node:path');
-const { app, BrowserWindow, dialog, ipcMain } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, Menu } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const { DataService } = require('./data-service.cjs');
 
@@ -71,6 +71,8 @@ function can(action) {
       'reports.export',
       'workbook.import',
       'workbook.export',
+      'backup.import',
+      'backup.export',
       'members.importTemplate',
       'users.list',
       'users.create',
@@ -95,6 +97,8 @@ function can(action) {
       'reports.export',
       'workbook.import',
       'workbook.export',
+      'backup.import',
+      'backup.export',
     ]),
     Users: new Set(['members.list', 'entries.list', 'reports.generate']),
   };
@@ -109,14 +113,31 @@ function requirePermission(action) {
   }
 }
 
-function requireDeaconAdminApproval(payload) {
-  if (getRole() !== 'Deacons') return;
+function requireEntryAdminApproval(payload, action, targetEntryId) {
+  const role = getRole();
+  if (!['Deacons', 'Accounting'].includes(role || '')) return;
+
   const username = String(payload?.adminUsername || '').trim();
   const password = String(payload?.adminPassword || '');
-  const valid = dataService.verifyAdminCredentials(username, password);
-  if (!valid) {
-    throw new Error('Admin approval is required for Deacons to edit giving entries.');
+  const note = String(payload?.adminNote || '').trim();
+  if (!note) {
+    throw new Error('Admin note is required for this action.');
   }
+
+  const adminUser = dataService.verifyAdminCredentials(username, password);
+  if (!adminUser) {
+    throw new Error('Incorrect admin username or password.');
+  }
+
+  dataService.logAdminApproval({
+    actorUserId: sessionUser?.id,
+    actorRole: role,
+    action,
+    targetEntryId,
+    adminUserId: adminUser.id,
+    adminUsername: adminUser.username,
+    note,
+  });
 }
 
 function setupAutoUpdater() {
@@ -167,6 +188,153 @@ function setupAutoUpdater() {
   autoUpdater.checkForUpdates().catch((error) => {
     console.error('[updater] check failed:', error?.message || error);
   });
+}
+
+async function importMembersTemplateFlow() {
+  requirePermission('members.importTemplate');
+  const selected = await dialog.showOpenDialog({
+    title: 'Import members template',
+    properties: ['openFile'],
+    filters: [{ name: 'Excel Workbook', extensions: ['xlsx', 'xls'] }],
+  });
+  if (selected.canceled || selected.filePaths.length === 0) return { canceled: true };
+  return dataService.importMembersTemplate(selected.filePaths[0]);
+}
+
+async function importWorkbookFlow() {
+  requirePermission('workbook.import');
+  const selected = await dialog.showOpenDialog({
+    title: 'Import FaithFlow workbook',
+    properties: ['openFile'],
+    filters: [{ name: 'Excel Workbook', extensions: ['xlsx'] }],
+  });
+  if (selected.canceled || selected.filePaths.length === 0) return { canceled: true };
+  return dataService.importAppWorkbook(selected.filePaths[0]);
+}
+
+async function exportWorkbookFlow() {
+  requirePermission('workbook.export');
+  const saved = await dialog.showSaveDialog({
+    title: 'Export FaithFlow workbook',
+    defaultPath: 'faithflow-export.xlsx',
+    filters: [{ name: 'Excel Workbook', extensions: ['xlsx'] }],
+  });
+  if (saved.canceled || !saved.filePath) return { canceled: true };
+  return dataService.exportWorkbook(saved.filePath);
+}
+
+async function exportFullBackupFlow() {
+  requirePermission('backup.export');
+  const saved = await dialog.showSaveDialog({
+    title: 'Export Full Backup',
+    defaultPath: `faithflow-backup-${new Date().toISOString().slice(0, 10)}.faithflow.json`,
+    filters: [{ name: 'FaithFlow Backup', extensions: ['json', 'faithflow.json'] }],
+  });
+  if (saved.canceled || !saved.filePath) return { canceled: true };
+  return dataService.exportFullBackup(saved.filePath);
+}
+
+async function importFullBackupFlow() {
+  requirePermission('backup.import');
+  const selected = await dialog.showOpenDialog({
+    title: 'Import Full Backup',
+    properties: ['openFile'],
+    filters: [{ name: 'FaithFlow Backup', extensions: ['json', 'faithflow.json'] }],
+  });
+  if (selected.canceled || selected.filePaths.length === 0) return { canceled: true };
+  return dataService.importFullBackup(selected.filePaths[0]);
+}
+
+async function checkForUpdatesManual() {
+  if (isDev) {
+    await dialog.showMessageBox({
+      type: 'info',
+      title: 'Updater',
+      message: 'Updater is only available in packaged builds.',
+    });
+    return;
+  }
+
+  setupAutoUpdater();
+  autoUpdater.once('update-not-available', async () => {
+    await dialog.showMessageBox({
+      type: 'info',
+      title: 'Update',
+      message: 'You are already using the latest version.',
+    });
+  });
+  autoUpdater.checkForUpdates().catch(async (error) => {
+    await dialog.showMessageBox({
+      type: 'error',
+      title: 'Update Error',
+      message: error?.message || 'Failed to check for updates.',
+    });
+  });
+}
+
+function menuAction(fn) {
+  return () => {
+    Promise.resolve()
+      .then(fn)
+      .catch(async (error) => {
+        await dialog.showMessageBox({
+          type: 'error',
+          title: 'Action Failed',
+          message: error instanceof Error ? error.message : 'Unknown error',
+        });
+      });
+  };
+}
+
+function buildAppMenu() {
+  const template = [
+    ...(process.platform === 'darwin'
+      ? [
+          {
+            label: app.name,
+            submenu: [
+              { role: 'about' },
+              { type: 'separator' },
+              { role: 'services' },
+              { type: 'separator' },
+              { role: 'hide' },
+              { role: 'hideOthers' },
+              { role: 'unhide' },
+              { type: 'separator' },
+              { role: 'quit' },
+            ],
+          },
+        ]
+      : []),
+    {
+      label: 'File',
+      submenu: [
+        {
+          label: 'Import',
+          submenu: [
+            { label: 'Members Template', click: menuAction(importMembersTemplateFlow) },
+            { label: 'FaithFlow Workbook', click: menuAction(importWorkbookFlow) },
+            { label: 'Full Backup', click: menuAction(importFullBackupFlow) },
+          ],
+        },
+        {
+          label: 'Export',
+          submenu: [
+            { label: 'FaithFlow Workbook', click: menuAction(exportWorkbookFlow) },
+            { label: 'Full Backup', click: menuAction(exportFullBackupFlow) },
+          ],
+        },
+        { type: 'separator' },
+        ...(process.platform === 'darwin' ? [{ role: 'close' }] : [{ role: 'quit' }]),
+      ],
+    },
+    {
+      label: 'Help',
+      submenu: [{ label: 'Update', click: menuAction(checkForUpdatesManual) }],
+    },
+  ];
+
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
 app.whenReady().then(() => {
@@ -289,8 +457,8 @@ app.whenReady().then(() => {
     'entries:update',
     withErrorHandling((_event, payload) => {
       requireAuth();
-      if (getRole() === 'Deacons') {
-        requireDeaconAdminApproval(payload);
+      if (['Deacons', 'Accounting'].includes(getRole() || '')) {
+        requireEntryAdminApproval(payload, 'entries.update', payload?.id);
       } else {
         requirePermission('entries.update');
       }
@@ -302,12 +470,13 @@ app.whenReady().then(() => {
     'entries:delete',
     withErrorHandling((_event, payload) => {
       requireAuth();
-      if (getRole() === 'Deacons') {
-        requireDeaconAdminApproval(payload);
+      const entryId = payload?.id || payload;
+      if (['Deacons', 'Accounting'].includes(getRole() || '')) {
+        requireEntryAdminApproval(payload, 'entries.delete', entryId);
       } else {
         requirePermission('entries.delete');
       }
-      return { ok: true, data: dataService.deleteEntry(payload?.id || payload) };
+      return { ok: true, data: dataService.deleteEntry(entryId) };
     })
   );
 
@@ -339,59 +508,31 @@ app.whenReady().then(() => {
 
   ipcMain.handle(
     'excel:importMembersTemplate',
-    withErrorHandling(async () => {
-      requirePermission('members.importTemplate');
-      const selected = await dialog.showOpenDialog({
-        title: 'Import members template',
-        properties: ['openFile'],
-        filters: [{ name: 'Excel Workbook', extensions: ['xlsx', 'xls'] }],
-      });
-
-      if (selected.canceled || selected.filePaths.length === 0) {
-        return { ok: true, data: { canceled: true } };
-      }
-
-      return { ok: true, data: dataService.importMembersTemplate(selected.filePaths[0]) };
-    })
+    withErrorHandling(async () => ({ ok: true, data: await importMembersTemplateFlow() }))
   );
 
   ipcMain.handle(
     'excel:importAppWorkbook',
-    withErrorHandling(async () => {
-      requirePermission('workbook.import');
-      const selected = await dialog.showOpenDialog({
-        title: 'Import FaithFlow workbook',
-        properties: ['openFile'],
-        filters: [{ name: 'Excel Workbook', extensions: ['xlsx'] }],
-      });
-
-      if (selected.canceled || selected.filePaths.length === 0) {
-        return { ok: true, data: { canceled: true } };
-      }
-
-      return { ok: true, data: dataService.importAppWorkbook(selected.filePaths[0]) };
-    })
+    withErrorHandling(async () => ({ ok: true, data: await importWorkbookFlow() }))
   );
 
   ipcMain.handle(
     'excel:exportAppWorkbook',
-    withErrorHandling(async () => {
-      requirePermission('workbook.export');
-      const saved = await dialog.showSaveDialog({
-        title: 'Export FaithFlow workbook',
-        defaultPath: 'faithflow-export.xlsx',
-        filters: [{ name: 'Excel Workbook', extensions: ['xlsx'] }],
-      });
+    withErrorHandling(async () => ({ ok: true, data: await exportWorkbookFlow() }))
+  );
 
-      if (saved.canceled || !saved.filePath) {
-        return { ok: true, data: { canceled: true } };
-      }
+  ipcMain.handle(
+    'backup:exportFull',
+    withErrorHandling(async () => ({ ok: true, data: await exportFullBackupFlow() }))
+  );
 
-      return { ok: true, data: dataService.exportWorkbook(saved.filePath) };
-    })
+  ipcMain.handle(
+    'backup:importFull',
+    withErrorHandling(async () => ({ ok: true, data: await importFullBackupFlow() }))
   );
 
   createWindow();
+  buildAppMenu();
   setupAutoUpdater();
 
   app.on('activate', () => {

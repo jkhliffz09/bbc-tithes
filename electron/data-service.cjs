@@ -100,6 +100,18 @@ class DataService {
         updated_at TEXT NOT NULL
       );
 
+      CREATE TABLE IF NOT EXISTS admin_approvals (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        actor_user_id INTEGER NOT NULL,
+        actor_role TEXT NOT NULL,
+        action TEXT NOT NULL,
+        target_entry_id INTEGER,
+        admin_user_id INTEGER NOT NULL,
+        admin_username TEXT NOT NULL,
+        note TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+
       CREATE INDEX IF NOT EXISTS idx_entries_service_date ON entries(service_date);
       CREATE INDEX IF NOT EXISTS idx_entries_member_id ON entries(member_id);
       CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
@@ -202,12 +214,35 @@ class DataService {
 
   verifyAdminCredentials(username, password) {
     const user = this.db
-      .prepare('SELECT role, password_hash AS passwordHash, is_active AS isActive FROM users WHERE lower(username)=lower(?)')
+      .prepare(
+        'SELECT id, username, role, password_hash AS passwordHash, is_active AS isActive FROM users WHERE lower(username)=lower(?)'
+      )
       .get(String(username || '').trim());
 
-    if (!user || !user.isActive) return false;
-    if (user.role !== 'Admin') return false;
-    return user.passwordHash === hashPassword(password);
+    if (!user || !user.isActive) return null;
+    if (user.role !== 'Admin') return null;
+    if (user.passwordHash !== hashPassword(password)) return null;
+    return { id: user.id, username: user.username };
+  }
+
+  logAdminApproval(payload) {
+    this.db
+      .prepare(
+        `INSERT INTO admin_approvals
+        (actor_user_id, actor_role, action, target_entry_id, admin_user_id, admin_username, note, created_at)
+        VALUES
+        (@actorUserId, @actorRole, @action, @targetEntryId, @adminUserId, @adminUsername, @note, @createdAt)`
+      )
+      .run({
+        actorUserId: Number(payload.actorUserId),
+        actorRole: String(payload.actorRole || ''),
+        action: String(payload.action || ''),
+        targetEntryId: payload.targetEntryId ? Number(payload.targetEntryId) : null,
+        adminUserId: Number(payload.adminUserId),
+        adminUsername: String(payload.adminUsername || ''),
+        note: String(payload.note || '').trim(),
+        createdAt: this.now(),
+      });
   }
 
   listUsers() {
@@ -226,6 +261,24 @@ class DataService {
       )
       .all()
       .map((u) => this.sanitizeUser(u));
+  }
+
+  listUsersWithSecrets() {
+    return this.db
+      .prepare(
+        `SELECT
+           id,
+           username,
+           full_name AS fullName,
+           role,
+           password_hash AS passwordHash,
+           is_active AS isActive,
+           created_at AS createdAt,
+           updated_at AS updatedAt
+         FROM users
+         ORDER BY id ASC`
+      )
+      .all();
   }
 
   createUser(payload) {
@@ -774,6 +827,201 @@ class DataService {
       path: targetPath,
       memberCount: members.length,
       entryCount: entries.length,
+    };
+  }
+
+  exportFullBackup(targetPath) {
+    if (!targetPath) throw new Error('Backup path is required.');
+
+    const members = this.db
+      .prepare(
+        `SELECT
+           id,
+           member_code AS memberCode,
+           full_name AS fullName,
+           birthday,
+           contact,
+           address,
+           created_at AS createdAt,
+           updated_at AS updatedAt
+         FROM members
+         ORDER BY id ASC`
+      )
+      .all();
+
+    const entries = this.db
+      .prepare(
+        `SELECT
+           id,
+           member_id AS memberId,
+           service_date AS serviceDate,
+           service_type AS serviceType,
+           tithes,
+           faith_promise AS faithPromise,
+           loose_offerings AS looseOfferings,
+           thanksgiving,
+           notes,
+           created_at AS createdAt,
+           updated_at AS updatedAt
+         FROM entries
+         ORDER BY id ASC`
+      )
+      .all();
+
+    const users = this.listUsersWithSecrets();
+    const approvals = this.db
+      .prepare(
+        `SELECT
+           id,
+           actor_user_id AS actorUserId,
+           actor_role AS actorRole,
+           action,
+           target_entry_id AS targetEntryId,
+           admin_user_id AS adminUserId,
+           admin_username AS adminUsername,
+           note,
+           created_at AS createdAt
+         FROM admin_approvals
+         ORDER BY id ASC`
+      )
+      .all();
+
+    const backup = {
+      schemaVersion: 1,
+      exportedAt: this.now(),
+      source: {
+        appName: 'FaithFlow - BBC Tithes and Offerings',
+      },
+      data: {
+        members,
+        entries,
+        users,
+        approvals,
+      },
+    };
+
+    fs.writeFileSync(targetPath, JSON.stringify(backup, null, 2), 'utf-8');
+
+    return {
+      success: true,
+      path: targetPath,
+      memberCount: members.length,
+      entryCount: entries.length,
+      userCount: users.length,
+      approvalCount: approvals.length,
+    };
+  }
+
+  importFullBackup(sourcePath) {
+    if (!sourcePath) throw new Error('Backup path is required.');
+    const raw = fs.readFileSync(sourcePath, 'utf-8');
+    const parsed = JSON.parse(raw);
+
+    if (!parsed?.data || !Array.isArray(parsed.data.members) || !Array.isArray(parsed.data.entries)) {
+      throw new Error('Invalid backup file format.');
+    }
+
+    const users = Array.isArray(parsed.data.users) ? parsed.data.users : [];
+    const approvals = Array.isArray(parsed.data.approvals) ? parsed.data.approvals : [];
+
+    const tx = this.db.transaction(() => {
+      this.db.prepare('DELETE FROM admin_approvals').run();
+      this.db.prepare('DELETE FROM entries').run();
+      this.db.prepare('DELETE FROM members').run();
+      this.db.prepare('DELETE FROM users').run();
+
+      const insertMember = this.db.prepare(
+        `INSERT INTO members
+        (id, member_code, full_name, birthday, contact, address, created_at, updated_at)
+        VALUES
+        (@id, @memberCode, @fullName, @birthday, @contact, @address, @createdAt, @updatedAt)`
+      );
+      const insertEntry = this.db.prepare(
+        `INSERT INTO entries
+        (id, member_id, service_date, service_type, tithes, faith_promise, loose_offerings, thanksgiving, notes, created_at, updated_at)
+        VALUES
+        (@id, @memberId, @serviceDate, @serviceType, @tithes, @faithPromise, @looseOfferings, @thanksgiving, @notes, @createdAt, @updatedAt)`
+      );
+      const insertUser = this.db.prepare(
+        `INSERT INTO users
+        (id, username, full_name, role, password_hash, is_active, created_at, updated_at)
+        VALUES
+        (@id, @username, @fullName, @role, @passwordHash, @isActive, @createdAt, @updatedAt)`
+      );
+      const insertApproval = this.db.prepare(
+        `INSERT INTO admin_approvals
+        (id, actor_user_id, actor_role, action, target_entry_id, admin_user_id, admin_username, note, created_at)
+        VALUES
+        (@id, @actorUserId, @actorRole, @action, @targetEntryId, @adminUserId, @adminUsername, @note, @createdAt)`
+      );
+
+      for (const m of parsed.data.members) {
+        insertMember.run({
+          id: Number(m.id),
+          memberCode: String(m.memberCode || '').trim() || null,
+          fullName: String(m.fullName || '').trim(),
+          birthday: toDateString(m.birthday) || null,
+          contact: String(m.contact || '').trim() || null,
+          address: String(m.address || '').trim() || null,
+          createdAt: String(m.createdAt || this.now()),
+          updatedAt: String(m.updatedAt || this.now()),
+        });
+      }
+
+      for (const e of parsed.data.entries) {
+        const serviceType = String(e.serviceType || '').trim();
+        if (!SERVICE_TYPES.has(serviceType)) continue;
+        insertEntry.run({
+          id: Number(e.id),
+          memberId: Number(e.memberId),
+          serviceDate: toDateString(e.serviceDate),
+          serviceType,
+          tithes: valueToNumber(e.tithes),
+          faithPromise: valueToNumber(e.faithPromise),
+          looseOfferings: valueToNumber(e.looseOfferings),
+          thanksgiving: valueToNumber(e.thanksgiving),
+          notes: String(e.notes || '').trim() || null,
+          createdAt: String(e.createdAt || this.now()),
+          updatedAt: String(e.updatedAt || this.now()),
+        });
+      }
+
+      for (const u of users) {
+        const role = normalizeRole(u.role);
+        insertUser.run({
+          id: Number(u.id),
+          username: String(u.username || '').trim(),
+          fullName: String(u.fullName || '').trim(),
+          role,
+          passwordHash: String(u.passwordHash || ''),
+          isActive: u.isActive === false || Number(u.isActive) === 0 ? 0 : 1,
+          createdAt: String(u.createdAt || this.now()),
+          updatedAt: String(u.updatedAt || this.now()),
+        });
+      }
+
+      for (const a of approvals) {
+        insertApproval.run({
+          id: Number(a.id),
+          actorUserId: Number(a.actorUserId),
+          actorRole: String(a.actorRole || ''),
+          action: String(a.action || ''),
+          targetEntryId: a.targetEntryId ? Number(a.targetEntryId) : null,
+          adminUserId: Number(a.adminUserId),
+          adminUsername: String(a.adminUsername || ''),
+          note: String(a.note || ''),
+          createdAt: String(a.createdAt || this.now()),
+        });
+      }
+    });
+
+    tx();
+
+    return {
+      success: true,
+      memberCount: this.listMembers('').length,
+      entryCount: this.listEntries({}).length,
+      userCount: this.listUsers().length,
     };
   }
 

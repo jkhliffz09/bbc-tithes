@@ -35,4 +35,6 @@ contextBridge.exposeInMainWorld('faithflow', {
   importMembersTemplate: () => invoke('excel:importMembersTemplate'),
   importAppWorkbook: () => invoke('excel:importAppWorkbook'),
   exportAppWorkbook: () => invoke('excel:exportAppWorkbook'),
+  exportFullBackup: () => invoke('backup:exportFull'),
+  importFullBackup: () => invoke('backup:importFull'),
 });

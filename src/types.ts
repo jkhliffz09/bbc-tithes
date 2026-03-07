@@ -72,6 +72,7 @@ export type ImportExportResult = {
   totalMembers?: number;
   memberCount?: number;
   entryCount?: number;
+  userCount?: number;
   rowCount?: number;
   path?: string;
 };
@@ -108,14 +109,16 @@ declare global {
 
       listEntries: (filters: { month?: string; memberId?: number }) => Promise<Entry[]>;
       createEntry: (payload: Partial<Entry>) => Promise<Entry>;
-      updateEntry: (payload: Partial<Entry> & { id: number; adminUsername?: string; adminPassword?: string }) => Promise<Entry>;
-      deleteEntry: (payload: { id: number; adminUsername?: string; adminPassword?: string } | number) => Promise<{ success: true }>;
+      updateEntry: (payload: Partial<Entry> & { id: number; adminUsername?: string; adminPassword?: string; adminNote?: string }) => Promise<Entry>;
+      deleteEntry: (payload: { id: number; adminUsername?: string; adminPassword?: string; adminNote?: string } | number) => Promise<{ success: true }>;
 
       generateReport: (filters: { dateFrom: string; dateTo: string }) => Promise<ReportPayload>;
       exportReportExcel: (filters: { dateFrom: string; dateTo: string }) => Promise<ImportExportResult>;
       importMembersTemplate: () => Promise<ImportExportResult>;
       importAppWorkbook: () => Promise<ImportExportResult>;
       exportAppWorkbook: () => Promise<ImportExportResult>;
+      exportFullBackup: () => Promise<ImportExportResult>;
+      importFullBackup: () => Promise<ImportExportResult>;
     };
   }
 }

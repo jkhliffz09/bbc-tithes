@@ -14,6 +14,7 @@ Desktop app to record church members' tithes and offerings (Sunday/Wednesday), w
 - Member search in Giving Entries form for large member lists
 - Import members from BBC members workbook template
 - Import/export full app data to `.xlsx` (Members + Entries sheets)
+- Export/Import **Full Backup** (`.faithflow.json`) for cross-device migration and full sync (Mac/Windows)
 - Generate report by date range
 - Print report
 - Export generated report to Excel
