@@ -191,7 +191,6 @@ function App() {
   });
   const [reportAudit, setReportAudit] = useState({ actualMoneyOnHand: '0' });
   const [report, setReport] = useState<ReportPayload | null>(null);
-  const [previewOpen, setPreviewOpen] = useState(false);
   const [generatedReports, setGeneratedReports] = useState<GeneratedReportItem[]>([]);
   const [generatedConflict, setGeneratedConflict] = useState<{
     generatedId: number;
@@ -340,6 +339,17 @@ function App() {
     if (!data) return;
     setReport(data.report);
     setTimeout(() => window.print(), 120);
+  }
+
+  async function removeGeneratedReport(id: number) {
+    const ok = window.confirm('Delete this generated report?');
+    if (!ok) return;
+    const deleted = await run('Generated report deleted.', () => window.faithflow.deleteGeneratedReport(id));
+    if (!deleted) return;
+    if (generatedConflict?.generatedId === id) {
+      setGeneratedConflict(null);
+    }
+    await loadGeneratedReports();
   }
 
   async function seedNextMemberCode() {
@@ -585,7 +595,6 @@ function App() {
     });
     setMemberEntrySearch('');
     await loadEntries();
-    await generateReport();
   }
 
   async function removeEntry(id: number) {
@@ -607,7 +616,6 @@ function App() {
     });
     setMemberEntrySearch('');
     await loadEntries();
-    await generateReport();
   }
 
   async function submitAdminApproval(event: FormEvent) {
@@ -658,7 +666,6 @@ function App() {
     setPendingEntryAction(null);
     setAdminApproval({ adminUsername: '', adminPassword: '', adminNote: '' });
     await loadEntries();
-    await generateReport();
   }
 
   function editEntry(entry: Entry) {
@@ -702,11 +709,6 @@ function App() {
   function printReport() {
     if (!report) return;
     window.print();
-  }
-
-  function openPrintPreview() {
-    if (!report) return;
-    setPreviewOpen(true);
   }
 
   if (!authUser) {
@@ -1083,10 +1085,10 @@ function App() {
         )}
 
         {tab === 'reports' && (
-          <section className="panel single">
-            <div className="split-header">
-              <h2>Printable Report</h2>
-              <div className="report-actions">
+          <section className="grid gap-4 lg:grid-cols-[360px_1fr]">
+            <article className="rounded-xl border border-slate-200 bg-white p-4">
+              <h2 className="mb-3 text-lg font-semibold text-slate-800">Printable Report</h2>
+              <div className="form">
                 {isDeaconRole ? (
                   <label>
                     Date
@@ -1099,7 +1101,7 @@ function App() {
                     />
                   </label>
                 ) : (
-                  <>
+                  <div className="grid-inline">
                     <label>
                       From
                       <input
@@ -1116,10 +1118,10 @@ function App() {
                         onChange={(e) => setReportRange((p) => ({ ...p, dateTo: e.target.value }))}
                       />
                     </label>
-                  </>
+                  </div>
                 )}
                 {isDeaconRole ? (
-                  <>
+                  <div className="grid-inline">
                     <label>
                       Signatory Deacon 1
                       <input value={reportDeacon1} readOnly />
@@ -1128,9 +1130,9 @@ function App() {
                       Signatory Deacon 2
                       <input value={reportDeacon2} readOnly />
                     </label>
-                  </>
+                  </div>
                 ) : (
-                  <>
+                  <div className="grid-inline">
                     <label>
                       Signatory Admin
                       <input
@@ -1145,7 +1147,7 @@ function App() {
                         onChange={(e) => setReportSignatory((p) => ({ ...p, accountingName: e.target.value }))}
                       />
                     </label>
-                  </>
+                  </div>
                 )}
                 <label>
                   Total Audited Amount
@@ -1167,160 +1169,167 @@ function App() {
                     onChange={(e) => setReportAudit((p) => ({ ...p, actualMoneyOnHand: e.target.value }))}
                   />
                 </label>
-                <button onClick={generateReport} disabled={busy || !can(role, 'reports.generate')}>Generate</button>
-                <button className="secondary" onClick={openPrintPreview}>Print</button>
-                {can(role, 'reports.export') && (
-                  <button className="secondary" onClick={exportReportExcel}>Export Excel</button>
-                )}
+                <div className="row-actions">
+                  <button onClick={generateReport} disabled={busy || !can(role, 'reports.generate')}>Generate</button>
+                  <button className="secondary" onClick={printReport}>Print</button>
+                  {can(role, 'reports.export') && (
+                    <button className="secondary" onClick={exportReportExcel}>Export Excel</button>
+                  )}
+                </div>
               </div>
-            </div>
 
-            {report && (
-              <div className="report-print">
-                <header className="print-header">
-                  <h3>Bible Baptist Church</h3>
-                  <p>FaithFlow Giving Report</p>
-                  <p>{report.dateFrom === report.dateTo ? report.dateFrom : `${report.dateFrom} to ${report.dateTo}`}</p>
-                </header>
-
+              <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                <h3 className="mb-2 text-base font-semibold text-slate-700">Generated Reports</h3>
                 <div className="table-wrap">
                   <table>
                     <thead>
                       <tr>
-                        <th>Code</th>
-                        <th>Member</th>
-                        <th>Tithes</th>
-                        <th>Faith Promise</th>
-                        <th>Total</th>
+                        <th>Generated At</th>
+                        <th>Date From</th>
+                        <th>Date To</th>
+                        <th>Actions</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {report.rows.map((row) => (
-                        <tr key={row.memberId}>
-                          <td>{row.memberCode || '-'}</td>
-                          <td>{row.memberName}</td>
-                          <td>{money(row.tithes)}</td>
-                          <td>{money(row.faithPromise)}</td>
-                          <td>{money(row.total)}</td>
+                      {generatedReports.map((g) => (
+                        <tr key={g.id}>
+                          <td>{g.createdAt}</td>
+                          <td>{g.dateFrom}</td>
+                          <td>{g.dateTo}</td>
+                          <td>
+                            <div className="inline-actions">
+                              <button type="button" className="tiny" onClick={() => openGeneratedReport(g.id)}>Open</button>
+                              <button type="button" className="tiny secondary" onClick={() => exportGeneratedReport(g.id)}>Download</button>
+                              <button type="button" className="tiny secondary" onClick={() => printGeneratedReport(g.id)}>Print</button>
+                              <button type="button" className="tiny danger" onClick={() => removeGeneratedReport(g.id)}>Delete</button>
+                            </div>
+                          </td>
                         </tr>
                       ))}
+                      {generatedReports.length === 0 && (
+                        <tr>
+                          <td colSpan={4} className="muted">No generated reports for the selected date filter.</td>
+                        </tr>
+                      )}
                     </tbody>
-                    <tfoot>
-                      <tr>
-                        <th></th>
-                        <th>Grand Total</th>
-                        <th>{money(report.summary.tithes)}</th>
-                        <th>{money(report.summary.faithPromise)}</th>
-                        <th>{money(report.summary.total)}</th>
-                      </tr>
-                    </tfoot>
                   </table>
                 </div>
-                <section className="thanksgiving-page">
+              </div>
+            </article>
+
+            <article className="rounded-xl border border-slate-200 bg-white p-4">
+              {report && (
+                <div className="report-print">
                   <header className="print-header">
                     <h3>Bible Baptist Church</h3>
-                    <p>Thanksgiving Report</p>
+                    <p>FaithFlow Giving Report</p>
                     <p>{report.dateFrom === report.dateTo ? report.dateFrom : `${report.dateFrom} to ${report.dateTo}`}</p>
                   </header>
+
                   <div className="table-wrap">
                     <table>
                       <thead>
                         <tr>
                           <th>Code</th>
                           <th>Member</th>
-                          <th>Thanksgiving</th>
+                          <th>Tithes</th>
+                          <th>Faith Promise</th>
+                          <th>Total</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {report.rows
-                          .filter((row) => row.thanksgiving !== 0)
-                          .map((row) => (
-                            <tr key={`thanks-${row.memberId}`}>
-                              <td>{row.memberCode || '-'}</td>
-                              <td>{row.memberName}</td>
-                              <td>{money(row.thanksgiving)}</td>
-                            </tr>
-                          ))}
+                        {report.rows.map((row) => (
+                          <tr key={row.memberId}>
+                            <td>{row.memberCode || '-'}</td>
+                            <td>{row.memberName}</td>
+                            <td>{money(row.tithes)}</td>
+                            <td>{money(row.faithPromise)}</td>
+                            <td>{money(row.total)}</td>
+                          </tr>
+                        ))}
                       </tbody>
                       <tfoot>
                         <tr>
                           <th></th>
-                          <th>Total Thanksgiving</th>
-                          <th>{money(report.summary.thanksgiving)}</th>
+                          <th>Grand Total</th>
+                          <th>{money(report.summary.tithes)}</th>
+                          <th>{money(report.summary.faithPromise)}</th>
+                          <th>{money(report.summary.total)}</th>
                         </tr>
                       </tfoot>
                     </table>
                   </div>
-                </section>
-                <div className="totals">
-                  <div>Total Audited Amount: {money(report.summary.auditedAmount)}</div>
-                  <div>Actual Money On Hand: {money(report.summary.actualMoneyOnHand)}</div>
-                  <div className="grand">Loose Offerings: {money(report.summary.looseOfferings)}</div>
-                </div>
+                  <section className="thanksgiving-page">
+                    <header className="print-header">
+                      <h3>Bible Baptist Church</h3>
+                      <p>Thanksgiving Report</p>
+                      <p>{report.dateFrom === report.dateTo ? report.dateFrom : `${report.dateFrom} to ${report.dateTo}`}</p>
+                    </header>
+                    <div className="table-wrap">
+                      <table>
+                        <thead>
+                          <tr>
+                            <th>Code</th>
+                            <th>Member</th>
+                            <th>Thanksgiving</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {report.rows
+                            .filter((row) => row.thanksgiving !== 0)
+                            .map((row) => (
+                              <tr key={`thanks-${row.memberId}`}>
+                                <td>{row.memberCode || '-'}</td>
+                                <td>{row.memberName}</td>
+                                <td>{money(row.thanksgiving)}</td>
+                              </tr>
+                            ))}
+                        </tbody>
+                        <tfoot>
+                          <tr>
+                            <th></th>
+                            <th>Total Thanksgiving</th>
+                            <th>{money(report.summary.thanksgiving)}</th>
+                          </tr>
+                        </tfoot>
+                      </table>
+                    </div>
+                  </section>
+                  <div className="totals">
+                    <div>Total Audited Amount: {money(report.summary.auditedAmount)}</div>
+                    <div>Actual Money On Hand: {money(report.summary.actualMoneyOnHand)}</div>
+                    <div className="grand">Loose Offerings: {money(report.summary.looseOfferings)}</div>
+                  </div>
 
-                <div className="signatories">
-                  {!!report.signatory.adminName && (
-                    <div className="signatory-line">
-                      <span>{report.signatory.adminName}</span>
-                      <small>Admin Signatory</small>
-                    </div>
-                  )}
-                  {!!report.signatory.accountingName && (
-                    <div className="signatory-line">
-                      <span>{report.signatory.accountingName}</span>
-                      <small>Accounting Signatory</small>
-                    </div>
-                  )}
-                  {!!report.signatory.deacon1Name && (
-                    <div className="signatory-line">
-                      <span>{report.signatory.deacon1Name}</span>
-                      <small>Deacon Signatory 1</small>
-                    </div>
-                  )}
-                  {!!report.signatory.deacon2Name && (
-                    <div className="signatory-line">
-                      <span>{report.signatory.deacon2Name}</span>
-                      <small>Deacon Signatory 2</small>
-                    </div>
-                  )}
+                  <div className="signatories">
+                    {!!report.signatory.adminName && (
+                      <div className="signatory-line">
+                        <span>{report.signatory.adminName}</span>
+                        <small>Admin Signatory</small>
+                      </div>
+                    )}
+                    {!!report.signatory.accountingName && (
+                      <div className="signatory-line">
+                        <span>{report.signatory.accountingName}</span>
+                        <small>Accounting Signatory</small>
+                      </div>
+                    )}
+                    {!!report.signatory.deacon1Name && (
+                      <div className="signatory-line">
+                        <span>{report.signatory.deacon1Name}</span>
+                        <small>Deacon Signatory 1</small>
+                      </div>
+                    )}
+                    {!!report.signatory.deacon2Name && (
+                      <div className="signatory-line">
+                        <span>{report.signatory.deacon2Name}</span>
+                        <small>Deacon Signatory 2</small>
+                      </div>
+                    )}
+                  </div>
                 </div>
-              </div>
-            )}
-
-            <h3>Generated Reports</h3>
-            <div className="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Generated At</th>
-                    <th>Date From</th>
-                    <th>Date To</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {generatedReports.map((g) => (
-                    <tr key={g.id}>
-                      <td>{g.createdAt}</td>
-                      <td>{g.dateFrom}</td>
-                      <td>{g.dateTo}</td>
-                      <td>
-                        <div className="inline-actions">
-                          <button type="button" className="tiny" onClick={() => openGeneratedReport(g.id)}>Open</button>
-                          <button type="button" className="tiny secondary" onClick={() => exportGeneratedReport(g.id)}>Download</button>
-                          <button type="button" className="tiny secondary" onClick={() => printGeneratedReport(g.id)}>Print</button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                  {generatedReports.length === 0 && (
-                    <tr>
-                      <td colSpan={4} className="muted">No generated reports for the selected date filter.</td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
+              )}
+            </article>
           </section>
         )}
 
@@ -1458,50 +1467,6 @@ function App() {
                 </button>
               </div>
             </form>
-          </section>
-        </div>
-      )}
-      {previewOpen && report && (
-        <div className="modal-backdrop" role="presentation">
-          <section className="modal-card">
-            <h3>Print Preview</h3>
-            <p className="muted">{report.dateFrom === report.dateTo ? report.dateFrom : `${report.dateFrom} to ${report.dateTo}`}</p>
-            <div className="table-wrap" style={{ maxHeight: '40vh' }}>
-              <table>
-                <thead>
-                  <tr>
-                    <th>Member</th>
-                    <th>Tithes</th>
-                    <th>Faith Promise</th>
-                    <th>Total</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {report.rows.map((row) => (
-                    <tr key={`preview-${row.memberId}`}>
-                      <td>{row.memberName}</td>
-                      <td>{money(row.tithes)}</td>
-                      <td>{money(row.faithPromise)}</td>
-                      <td>{money(row.total)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <div className="row-actions">
-              <button
-                type="button"
-                onClick={() => {
-                  setPreviewOpen(false);
-                  setTimeout(() => printReport(), 80);
-                }}
-              >
-                Print Now
-              </button>
-              <button type="button" className="secondary" onClick={() => setPreviewOpen(false)}>
-                Close
-              </button>
-            </div>
           </section>
         </div>
       )}

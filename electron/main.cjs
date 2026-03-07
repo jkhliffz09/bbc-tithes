@@ -636,6 +636,14 @@ app.whenReady().then(() => {
   );
 
   ipcMain.handle(
+    'reports:deleteGenerated',
+    withErrorHandling((_event, id) => {
+      requirePermission('reports.generate');
+      return { ok: true, data: dataService.deleteGeneratedReport(id) };
+    })
+  );
+
+  ipcMain.handle(
     'reports:exportExcel',
     withErrorHandling(async (_event, filters) => {
       requirePermission('reports.export');

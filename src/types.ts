@@ -140,6 +140,7 @@ declare global {
       generateReport: (filters: { dateFrom: string; dateTo: string; adminName?: string; accountingName?: string; deacon1Name?: string; deacon2Name?: string; actualMoneyOnHand?: number; forceNew?: boolean }) => Promise<GenerateReportResult>;
       listGeneratedReports: (filters: { dateFrom: string; dateTo: string }) => Promise<GeneratedReportItem[]>;
       getGeneratedReport: (id: number) => Promise<{ id: number; dateFrom: string; dateTo: string; createdAt: string; report: ReportPayload }>;
+      deleteGeneratedReport: (id: number) => Promise<{ success: true }>;
       exportReportExcel: (filters: { dateFrom: string; dateTo: string; adminName?: string; accountingName?: string; deacon1Name?: string; deacon2Name?: string; actualMoneyOnHand?: number }) => Promise<ImportExportResult>;
       exportGeneratedReportExcel: (id: number) => Promise<ImportExportResult>;
       importMembersTemplate: () => Promise<ImportExportResult>;
