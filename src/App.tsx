@@ -266,6 +266,7 @@ function App() {
   const [adminApproval, setAdminApproval] = useState({ adminUsername: '', adminPassword: '', adminNote: '' });
   const [duplicateDialog, setDuplicateDialog] = useState<DuplicateEntryDialog | null>(null);
   const [syncMode, setSyncMode] = useState<SyncDialogMode>(null);
+  const [syncProgress, setSyncProgress] = useState<'upload' | 'download' | null>(null);
   const [syncForm, setSyncForm] = useState<SyncConfig>({
     serverUrl: localStorage.getItem(SYNC_STORAGE_KEYS.serverUrl) || '',
     apiToken: localStorage.getItem(SYNC_STORAGE_KEYS.apiToken) || '',
@@ -301,15 +302,17 @@ function App() {
       openSyncDialog(mode);
       return;
     }
-    const result =
-      mode === 'upload'
-        ? await run('Backup uploaded to server.', () => window.faithflow.syncUploadToServer(payload))
-        : await run('Backup downloaded from server.', () => window.faithflow.syncDownloadFromServer(payload));
-    if (!result) {
-      openSyncDialog(mode);
-      return;
+    setSyncProgress(mode);
+    try {
+      const result =
+        mode === 'upload'
+          ? await run('Backup uploaded to server.', () => window.faithflow.syncUploadToServer(payload))
+          : await run('Backup downloaded from server.', () => window.faithflow.syncDownloadFromServer(payload));
+      if (!result) return;
+      setSyncMode(null);
+    } finally {
+      setSyncProgress(null);
     }
-    setSyncMode(null);
   }
 
   async function run<T>(label: string, fn: () => Promise<T>) {
@@ -931,6 +934,7 @@ function App() {
   async function submitSyncToServer(event: FormEvent) {
     event.preventDefault();
     if (!syncMode) return;
+    const mode = syncMode;
     const payload: SyncConfig = {
       serverUrl: syncForm.serverUrl.trim(),
       apiToken: syncForm.apiToken.trim(),
@@ -942,12 +946,8 @@ function App() {
       return;
     }
     saveSyncConfig(payload);
-    const result =
-      syncMode === 'upload'
-        ? await run('Backup uploaded to server.', () => window.faithflow.syncUploadToServer(payload))
-        : await run('Backup downloaded from server.', () => window.faithflow.syncDownloadFromServer(payload));
-    if (!result) return;
     setSyncMode(null);
+    await triggerSync(mode);
   }
 
   function printReport() {
@@ -1757,6 +1757,21 @@ function App() {
                 </button>
               </div>
             </form>
+          </section>
+        </div>
+      )}
+      {syncProgress && (
+        <div className="modal-backdrop" role="presentation">
+          <section className="modal-card">
+            <h3>{syncProgress === 'upload' ? 'Uploading...' : 'Downloading...'}</h3>
+            <p className="muted">
+              {syncProgress === 'upload'
+                ? 'Uploading encrypted backup to server. Please wait.'
+                : 'Downloading and restoring encrypted backup. Please wait.'}
+            </p>
+            <div className="sync-loading">
+              <span className="sync-spinner" aria-hidden="true" />
+            </div>
           </section>
         </div>
       )}

@@ -915,7 +915,7 @@ app.whenReady().then(() => {
         const text = await response.text();
         throw new Error(`Upload failed (${response.status}): ${text || 'Unknown error'}`);
       }
-      return { success: true };
+      return { ok: true, data: { success: true } };
     })
   );
 
@@ -949,7 +949,7 @@ app.whenReady().then(() => {
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('app:dataChanged', { message: 'Downloaded from server and restored.' });
       }
-      return result;
+      return { ok: true, data: result };
     })
   );
 

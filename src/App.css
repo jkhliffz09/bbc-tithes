@@ -258,6 +258,24 @@ tfoot th {
   @apply mb-2 mt-0;
 }
 
+.sync-loading {
+  @apply mt-3 flex justify-center;
+}
+
+.sync-spinner {
+  @apply inline-block h-8 w-8 rounded-full border-4 border-slate-300 border-t-sky-700;
+  animation: sync-spin 0.9s linear infinite;
+}
+
+@keyframes sync-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 @media print {
   .topbar,
   .tabs,
