@@ -49,7 +49,6 @@ export type ReportRow = {
   memberName: string;
   tithes: number;
   faithPromise: number;
-  looseOfferings: number;
   thanksgiving: number;
   total: number;
 };
@@ -59,6 +58,8 @@ export type ReportSummary = {
   faithPromise: number;
   looseOfferings: number;
   thanksgiving: number;
+  auditedAmount: number;
+  actualMoneyOnHand: number;
   total: number;
 };
 
@@ -123,8 +124,8 @@ declare global {
       updateEntry: (payload: Partial<Entry> & { id: number; adminUsername?: string; adminPassword?: string; adminNote?: string }) => Promise<Entry>;
       deleteEntry: (payload: { id: number; adminUsername?: string; adminPassword?: string; adminNote?: string } | number) => Promise<{ success: true }>;
 
-      generateReport: (filters: { dateFrom: string; dateTo: string; adminName?: string; accountingName?: string; deacon1Name?: string; deacon2Name?: string }) => Promise<ReportPayload>;
-      exportReportExcel: (filters: { dateFrom: string; dateTo: string; adminName?: string; accountingName?: string; deacon1Name?: string; deacon2Name?: string }) => Promise<ImportExportResult>;
+      generateReport: (filters: { dateFrom: string; dateTo: string; adminName?: string; accountingName?: string; deacon1Name?: string; deacon2Name?: string; auditedAmount?: number; actualMoneyOnHand?: number }) => Promise<ReportPayload>;
+      exportReportExcel: (filters: { dateFrom: string; dateTo: string; adminName?: string; accountingName?: string; deacon1Name?: string; deacon2Name?: string; auditedAmount?: number; actualMoneyOnHand?: number }) => Promise<ImportExportResult>;
       importMembersTemplate: () => Promise<ImportExportResult>;
       importAppWorkbook: () => Promise<ImportExportResult>;
       exportAppWorkbook: () => Promise<ImportExportResult>;

@@ -181,9 +181,16 @@ function setupAutoUpdater() {
     });
 
     if (result.response === 0) {
-      autoUpdater.downloadUpdate().catch((error) => {
+      try {
+        await autoUpdater.downloadUpdate();
+      } catch (error) {
         console.error('[updater] download failed:', error?.message || error);
-      });
+        await dialog.showMessageBox({
+          type: 'error',
+          title: 'Update Error',
+          message: `Failed to download update.\n\n${formatUpdaterError(error)}`,
+        });
+      }
     }
   });
 
@@ -199,7 +206,7 @@ function setupAutoUpdater() {
     });
 
     if (result.response === 0) {
-      autoUpdater.quitAndInstall();
+      autoUpdater.quitAndInstall(false, true);
     }
   });
 
@@ -545,6 +552,8 @@ app.whenReady().then(() => {
             dateTo: today,
             deacon1Name,
             deacon2Name,
+            auditedAmount: Number(filters?.auditedAmount || 0),
+            actualMoneyOnHand: Number(filters?.actualMoneyOnHand || 0),
           }),
         };
       }
@@ -556,6 +565,8 @@ app.whenReady().then(() => {
           dateTo: filters?.dateTo,
           adminName: String(filters?.adminName || '').trim(),
           accountingName: String(filters?.accountingName || '').trim(),
+          auditedAmount: Number(filters?.auditedAmount || 0),
+          actualMoneyOnHand: Number(filters?.actualMoneyOnHand || 0),
         }),
       };
     })
@@ -590,6 +601,8 @@ app.whenReady().then(() => {
             dateTo: today,
             deacon1Name,
             deacon2Name,
+            auditedAmount: Number(filters?.auditedAmount || 0),
+            actualMoneyOnHand: Number(filters?.actualMoneyOnHand || 0),
           }),
         };
       }
@@ -601,6 +614,8 @@ app.whenReady().then(() => {
           dateTo: filters?.dateTo,
           adminName: String(filters?.adminName || '').trim(),
           accountingName: String(filters?.accountingName || '').trim(),
+          auditedAmount: Number(filters?.auditedAmount || 0),
+          actualMoneyOnHand: Number(filters?.actualMoneyOnHand || 0),
         }),
       };
     })

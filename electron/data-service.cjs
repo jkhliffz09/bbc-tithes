@@ -767,9 +767,8 @@ class DataService {
            m.full_name AS memberName,
            SUM(e.tithes) AS tithes,
            SUM(e.faith_promise) AS faithPromise,
-           SUM(e.loose_offerings) AS looseOfferings,
            SUM(e.thanksgiving) AS thanksgiving,
-           SUM(e.tithes + e.faith_promise + e.loose_offerings + e.thanksgiving) AS total
+           SUM(e.tithes + e.faith_promise + e.thanksgiving) AS total
          FROM entries e
          INNER JOIN members m ON m.id = e.member_id
          WHERE e.service_date BETWEEN @dateFrom AND @dateTo
@@ -783,13 +782,17 @@ class DataService {
         `SELECT
            SUM(tithes) AS tithes,
            SUM(faith_promise) AS faithPromise,
-           SUM(loose_offerings) AS looseOfferings,
            SUM(thanksgiving) AS thanksgiving,
-           SUM(tithes + faith_promise + loose_offerings + thanksgiving) AS total
+           SUM(tithes + faith_promise + thanksgiving) AS total
          FROM entries
          WHERE service_date BETWEEN @dateFrom AND @dateTo`
       )
       .get({ dateFrom, dateTo });
+
+    const auditedAmount = valueToNumber(filters.auditedAmount);
+    const actualMoneyOnHand = valueToNumber(filters.actualMoneyOnHand);
+    const looseOfferings = auditedAmount - actualMoneyOnHand;
+    const baseTotal = valueToNumber(summary?.total);
 
     const signatory = {
       adminName: String(filters.adminName || '').trim(),
@@ -806,9 +809,11 @@ class DataService {
       summary: {
         tithes: valueToNumber(summary?.tithes),
         faithPromise: valueToNumber(summary?.faithPromise),
-        looseOfferings: valueToNumber(summary?.looseOfferings),
+        looseOfferings,
         thanksgiving: valueToNumber(summary?.thanksgiving),
-        total: valueToNumber(summary?.total),
+        auditedAmount,
+        actualMoneyOnHand,
+        total: baseTotal + looseOfferings,
       },
     };
   }
@@ -825,7 +830,6 @@ class DataService {
         MemberName: row.memberName,
         Tithes: row.tithes,
         FaithPromise: row.faithPromise,
-        LooseOfferings: row.looseOfferings,
         Thanksgiving: row.thanksgiving,
         Total: row.total,
       }))
@@ -835,20 +839,26 @@ class DataService {
       {
         DateFrom: report.dateFrom,
         DateTo: report.dateTo,
-        SignatoryAdmin: report.signatory.adminName,
-        SignatoryAccounting: report.signatory.accountingName,
-        SignatoryDeacon1: report.signatory.deacon1Name,
-        SignatoryDeacon2: report.signatory.deacon2Name,
         Tithes: report.summary.tithes,
         FaithPromise: report.summary.faithPromise,
+        AuditedAmount: report.summary.auditedAmount,
+        ActualMoneyOnHand: report.summary.actualMoneyOnHand,
         LooseOfferings: report.summary.looseOfferings,
         Thanksgiving: report.summary.thanksgiving,
         Total: report.summary.total,
       },
     ]);
 
+    const signatoryRows = [];
+    if (report.signatory.adminName) signatoryRows.push({ Role: 'Admin', Name: report.signatory.adminName });
+    if (report.signatory.accountingName) signatoryRows.push({ Role: 'Accounting', Name: report.signatory.accountingName });
+    if (report.signatory.deacon1Name) signatoryRows.push({ Role: 'Deacon 1', Name: report.signatory.deacon1Name });
+    if (report.signatory.deacon2Name) signatoryRows.push({ Role: 'Deacon 2', Name: report.signatory.deacon2Name });
+    const signatoriesSheet = XLSX.utils.json_to_sheet(signatoryRows.length ? signatoryRows : [{ Role: '', Name: '' }]);
+
     XLSX.utils.book_append_sheet(wb, summarySheet, 'Summary');
     XLSX.utils.book_append_sheet(wb, detailSheet, 'Details');
+    XLSX.utils.book_append_sheet(wb, signatoriesSheet, 'Signatories');
     XLSX.writeFile(wb, targetPath);
 
     return {
@@ -883,8 +893,6 @@ class DataService {
         MemberCode: e.memberCode || '',
         ServiceDate: e.serviceDate,
         ServiceType: e.serviceType,
-        AssignedDeacon1: e.assignedDeacon1Name || '',
-        AssignedDeacon2: e.assignedDeacon2Name || '',
         Tithes: e.tithes,
         FaithPromise: e.faithPromise,
         LooseOfferings: e.looseOfferings,

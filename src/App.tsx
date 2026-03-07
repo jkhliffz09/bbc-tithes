@@ -23,7 +23,6 @@ type EntryForm = {
   assignedDeacon2UserId: number;
   tithes: string;
   faithPromise: string;
-  looseOfferings: string;
   thanksgiving: string;
   notes: string;
 };
@@ -38,7 +37,7 @@ type UserForm = {
 };
 
 type PendingEntryAction =
-  | { type: 'update'; payload: { id: number; memberId: number; serviceDate: string; serviceType: ServiceType; assignedDeacon1UserId: number; assignedDeacon2UserId: number; tithes: number; faithPromise: number; looseOfferings: number; thanksgiving: number; notes: string } }
+  | { type: 'update'; payload: { id: number; memberId: number; serviceDate: string; serviceType: ServiceType; assignedDeacon1UserId: number; assignedDeacon2UserId: number; tithes: number; faithPromise: number; thanksgiving: number; notes: string } }
   | { type: 'delete'; entryId: number };
 
 const ROLE_OPTIONS: Role[] = ['Admin', 'Deacons', 'Accounting', 'Users'];
@@ -99,7 +98,6 @@ const emptyEntryForm: EntryForm = {
   assignedDeacon2UserId: 0,
   tithes: '0',
   faithPromise: '0',
-  looseOfferings: '0',
   thanksgiving: '0',
   notes: '',
 };
@@ -216,6 +214,10 @@ function App() {
     adminName: '',
     accountingName: '',
   });
+  const [reportAudit, setReportAudit] = useState({
+    auditedAmount: '0',
+    actualMoneyOnHand: '0',
+  });
   const [report, setReport] = useState<ReportPayload | null>(null);
   const [pendingEntryAction, setPendingEntryAction] = useState<PendingEntryAction | null>(null);
   const [adminApproval, setAdminApproval] = useState({ adminUsername: '', adminPassword: '', adminNote: '' });
@@ -261,17 +263,16 @@ function App() {
         (acc, row) => {
           acc.tithes += row.tithes || 0;
           acc.faithPromise += row.faithPromise || 0;
-          acc.looseOfferings += row.looseOfferings || 0;
           acc.thanksgiving += row.thanksgiving || 0;
           return acc;
         },
-        { tithes: 0, faithPromise: 0, looseOfferings: 0, thanksgiving: 0 }
+        { tithes: 0, faithPromise: 0, thanksgiving: 0 }
       ),
     [entries]
   );
 
   const monthGrandTotal =
-    monthTotals.tithes + monthTotals.faithPromise + monthTotals.looseOfferings + monthTotals.thanksgiving;
+    monthTotals.tithes + monthTotals.faithPromise + monthTotals.thanksgiving;
 
   async function loadUsers() {
     if (!can(authUser?.role || null, 'users.manage')) return;
@@ -313,11 +314,15 @@ function App() {
             dateTo: localTodayISO(),
             deacon1Name: deacon1?.fullName || '',
             deacon2Name: deacon2?.fullName || '',
+            auditedAmount: amount(reportAudit.auditedAmount),
+            actualMoneyOnHand: amount(reportAudit.actualMoneyOnHand),
           }
         : {
             ...reportRange,
             adminName: reportSignatory.adminName,
             accountingName: reportSignatory.accountingName,
+            auditedAmount: amount(reportAudit.auditedAmount),
+            actualMoneyOnHand: amount(reportAudit.actualMoneyOnHand),
           };
     const payload = await run('', () => window.faithflow.generateReport(filters));
     if (payload) setReport(payload);
@@ -520,7 +525,6 @@ function App() {
       assignedDeacon2UserId: entryForm.assignedDeacon2UserId,
       tithes: amount(entryForm.tithes),
       faithPromise: amount(entryForm.faithPromise),
-      looseOfferings: amount(entryForm.looseOfferings),
       thanksgiving: amount(entryForm.thanksgiving),
       notes: entryForm.notes,
     };
@@ -635,7 +639,6 @@ function App() {
       assignedDeacon2UserId: entry.assignedDeacon2UserId || 0,
       tithes: String(entry.tithes || 0),
       faithPromise: String(entry.faithPromise || 0),
-      looseOfferings: String(entry.looseOfferings || 0),
       thanksgiving: String(entry.thanksgiving || 0),
       notes: entry.notes || '',
     });
@@ -657,11 +660,15 @@ function App() {
             dateTo: localTodayISO(),
             deacon1Name: deacon1?.fullName || '',
             deacon2Name: deacon2?.fullName || '',
+            auditedAmount: amount(reportAudit.auditedAmount),
+            actualMoneyOnHand: amount(reportAudit.actualMoneyOnHand),
           }
         : {
             ...reportRange,
             adminName: reportSignatory.adminName,
             accountingName: reportSignatory.accountingName,
+            auditedAmount: amount(reportAudit.auditedAmount),
+            actualMoneyOnHand: amount(reportAudit.actualMoneyOnHand),
           };
     const result = await run('', () => window.faithflow.exportReportExcel(filters));
     if (!result || result.canceled) return;
@@ -952,10 +959,6 @@ function App() {
 
                 <div className="grid-inline">
                   <label>
-                    Loose Offerings
-                    <input type="number" min="0" step="0.01" value={entryForm.looseOfferings} onChange={(e) => setEntryForm((p) => ({ ...p, looseOfferings: e.target.value }))} />
-                  </label>
-                  <label>
                     Thanksgiving
                     <input type="number" min="0" step="0.01" value={entryForm.thanksgiving} onChange={(e) => setEntryForm((p) => ({ ...p, thanksgiving: e.target.value }))} />
                   </label>
@@ -1009,7 +1012,6 @@ function App() {
               <div className="totals">
                 <div>Tithes: {money(monthTotals.tithes)}</div>
                 <div>Faith Promise: {money(monthTotals.faithPromise)}</div>
-                <div>Loose Offerings: {money(monthTotals.looseOfferings)}</div>
                 <div>Thanksgiving: {money(monthTotals.thanksgiving)}</div>
                 <div className="grand">Total: {money(monthGrandTotal)}</div>
               </div>
@@ -1021,20 +1023,18 @@ function App() {
                       <th>Date</th>
                       <th>Service</th>
                       <th>Member</th>
-                      <th>Assigned Deacons</th>
                       <th>Total</th>
                       <th>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
                     {entries.map((entry) => {
-                      const total = entry.tithes + entry.faithPromise + entry.looseOfferings + entry.thanksgiving;
+                      const total = entry.tithes + entry.faithPromise + entry.thanksgiving;
                       return (
                         <tr key={entry.id}>
                           <td>{entry.serviceDate}</td>
                           <td>{entry.serviceType}</td>
                           <td>{entry.memberName}</td>
-                          <td>{entry.assignedDeacon1Name || '-'} / {entry.assignedDeacon2Name || '-'}</td>
                           <td>{money(total)}</td>
                           <td>
                             <div className="inline-actions">
@@ -1104,6 +1104,26 @@ function App() {
                     </label>
                   </>
                 )}
+                <label>
+                  Total Audited Amount
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={reportAudit.auditedAmount}
+                    onChange={(e) => setReportAudit((p) => ({ ...p, auditedAmount: e.target.value }))}
+                  />
+                </label>
+                <label>
+                  Actual Money On Hand
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={reportAudit.actualMoneyOnHand}
+                    onChange={(e) => setReportAudit((p) => ({ ...p, actualMoneyOnHand: e.target.value }))}
+                  />
+                </label>
                 <button onClick={generateReport} disabled={busy || !can(role, 'reports.generate')}>Generate</button>
                 <button className="secondary" onClick={printReport}>Print</button>
                 {can(role, 'reports.export') && (
@@ -1118,10 +1138,6 @@ function App() {
                   <h3>Bible Baptist Church</h3>
                   <p>FaithFlow Giving Report</p>
                   <p>{report.dateFrom} to {report.dateTo}</p>
-                  {!!report.signatory.adminName && <p>Admin Signatory: {report.signatory.adminName}</p>}
-                  {!!report.signatory.accountingName && <p>Accounting Signatory: {report.signatory.accountingName}</p>}
-                  {!!report.signatory.deacon1Name && <p>Deacon Signatory 1: {report.signatory.deacon1Name}</p>}
-                  {!!report.signatory.deacon2Name && <p>Deacon Signatory 2: {report.signatory.deacon2Name}</p>}
                 </header>
 
                 <div className="table-wrap">
@@ -1132,7 +1148,6 @@ function App() {
                         <th>Member</th>
                         <th>Tithes</th>
                         <th>Faith Promise</th>
-                        <th>Loose Offerings</th>
                         <th>Thanksgiving</th>
                         <th>Total</th>
                       </tr>
@@ -1144,7 +1159,6 @@ function App() {
                           <td>{row.memberName}</td>
                           <td>{money(row.tithes)}</td>
                           <td>{money(row.faithPromise)}</td>
-                          <td>{money(row.looseOfferings)}</td>
                           <td>{money(row.thanksgiving)}</td>
                           <td>{money(row.total)}</td>
                         </tr>
@@ -1156,12 +1170,43 @@ function App() {
                         <th>Grand Total</th>
                         <th>{money(report.summary.tithes)}</th>
                         <th>{money(report.summary.faithPromise)}</th>
-                        <th>{money(report.summary.looseOfferings)}</th>
                         <th>{money(report.summary.thanksgiving)}</th>
                         <th>{money(report.summary.total)}</th>
                       </tr>
                     </tfoot>
                   </table>
+                </div>
+                <div className="totals">
+                  <div>Total Audited Amount: {money(report.summary.auditedAmount)}</div>
+                  <div>Actual Money On Hand: {money(report.summary.actualMoneyOnHand)}</div>
+                  <div className="grand">Loose Offerings: {money(report.summary.looseOfferings)}</div>
+                </div>
+
+                <div className="signatories">
+                  {!!report.signatory.adminName && (
+                    <div className="signatory-line">
+                      <span>{report.signatory.adminName}</span>
+                      <small>Admin Signatory</small>
+                    </div>
+                  )}
+                  {!!report.signatory.accountingName && (
+                    <div className="signatory-line">
+                      <span>{report.signatory.accountingName}</span>
+                      <small>Accounting Signatory</small>
+                    </div>
+                  )}
+                  {!!report.signatory.deacon1Name && (
+                    <div className="signatory-line">
+                      <span>{report.signatory.deacon1Name}</span>
+                      <small>Deacon Signatory 1</small>
+                    </div>
+                  )}
+                  {!!report.signatory.deacon2Name && (
+                    <div className="signatory-line">
+                      <span>{report.signatory.deacon2Name}</span>
+                      <small>Deacon Signatory 2</small>
+                    </div>
+                  )}
                 </div>
               </div>
             )}

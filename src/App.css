@@ -255,7 +255,7 @@ tfoot th {
 
 .totals {
   display: grid;
-  grid-template-columns: repeat(5, minmax(100px, 1fr));
+  grid-template-columns: repeat(4, minmax(100px, 1fr));
   gap: 8px;
   margin-bottom: 10px;
 }
@@ -279,6 +279,29 @@ tfoot th {
 
 .print-header p {
   margin: 2px 0;
+}
+
+.signatories {
+  margin-top: 24px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(220px, 1fr));
+  gap: 24px;
+}
+
+.signatory-line {
+  display: grid;
+  gap: 4px;
+}
+
+.signatory-line span {
+  display: block;
+  border-top: 1px solid #2b3a4c;
+  padding-top: 6px;
+  font-weight: 600;
+}
+
+.signatory-line small {
+  color: var(--subtle);
 }
 
 .autocomplete-list {
@@ -364,6 +387,10 @@ tfoot th {
   .status,
   .report-actions {
     display: none !important;
+  }
+
+  .signatory-line small {
+    color: #000;
   }
 
   .app-shell {
