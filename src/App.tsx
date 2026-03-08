@@ -59,6 +59,7 @@ type DuplicateEntryDialog = {
 };
 
 type SyncDialogMode = 'upload' | 'download' | null;
+type MemberSortBy = 'firstName' | 'lastName';
 type SyncConfig = {
   serverUrl: string;
   apiToken: string;
@@ -173,6 +174,23 @@ function isPotentialMistype(a: string, b: string): boolean {
   return dist <= 2 || dist / maxLen <= 0.25;
 }
 
+function middleInitial(middleName: string): string {
+  const value = String(middleName || '').trim();
+  return value ? `${value.charAt(0).toUpperCase()}.` : '';
+}
+
+function formatMemberDisplayName(member: Member, sortBy: MemberSortBy): string {
+  const firstName = String(member.firstName || '').trim();
+  const mid = middleInitial(String(member.middleName || ''));
+  const lastName = String(member.lastName || '').trim();
+  const suffix = String(member.suffix || '').trim();
+  if (sortBy === 'lastName') {
+    const right = [firstName, mid].filter(Boolean).join(' ');
+    return `${lastName}, ${right}${suffix ? `, ${suffix}.` : ''}`.replace(/\s+/g, ' ').trim();
+  }
+  return [firstName, mid, lastName, suffix].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
+}
+
 function requiresAdminEntryApproval(role: Role | null): boolean {
   return role === 'Deacon' || role === 'Accounting';
 }
@@ -265,10 +283,7 @@ function App() {
   const [members, setMembers] = useState<Member[]>([]);
   const [memberForm, setMemberForm] = useState<MemberForm>(emptyMemberForm);
   const [selectedMemberIds, setSelectedMemberIds] = useState<number[]>([]);
-  const [memberSort, setMemberSort] = useState<{
-    key: 'firstName' | 'middleName' | 'lastName' | 'birthday';
-    dir: 'asc' | 'desc';
-  }>({ key: 'firstName', dir: 'asc' });
+  const [memberSortBy, setMemberSortBy] = useState<MemberSortBy>('lastName');
 
   const [memberEntrySearch, setMemberEntrySearch] = useState('');
   const [selectedDate, setSelectedDate] = useState(initialDate);
@@ -365,20 +380,30 @@ function App() {
   }
 
   const sortedMembers = useMemo(() => {
-    const sorted = members.slice().sort((a, b) => {
-      const av = String(a[memberSort.key] || '').toLowerCase();
-      const bv = String(b[memberSort.key] || '').toLowerCase();
-      return av.localeCompare(bv);
+    return members.slice().sort((a, b) => {
+      if (memberSortBy === 'lastName') {
+        const aLast = String(a.lastName || '').toLowerCase();
+        const bLast = String(b.lastName || '').toLowerCase();
+        const byLast = aLast.localeCompare(bLast);
+        if (byLast !== 0) return byLast;
+        return String(a.firstName || '').toLowerCase().localeCompare(String(b.firstName || '').toLowerCase());
+      }
+      const aFirst = String(a.firstName || '').toLowerCase();
+      const bFirst = String(b.firstName || '').toLowerCase();
+      const byFirst = aFirst.localeCompare(bFirst);
+      if (byFirst !== 0) return byFirst;
+      return String(a.lastName || '').toLowerCase().localeCompare(String(b.lastName || '').toLowerCase());
     });
-    return memberSort.dir === 'asc' ? sorted : sorted.reverse();
-  }, [members, memberSort]);
+  }, [members, memberSortBy]);
 
   const filteredMemberOptions = useMemo(() => {
     const q = memberEntrySearch.trim().toLowerCase();
     if (!q) return sortedMembers;
     return sortedMembers.filter((m) => {
       const code = (m.memberCode || '').toLowerCase();
-      return m.fullName.toLowerCase().includes(q) || code.includes(q);
+      const formattedLast = formatMemberDisplayName(m, 'lastName').toLowerCase();
+      const formattedFirst = formatMemberDisplayName(m, 'firstName').toLowerCase();
+      return m.fullName.toLowerCase().includes(q) || formattedLast.includes(q) || formattedFirst.includes(q) || code.includes(q);
     });
   }, [sortedMembers, memberEntrySearch]);
 
@@ -1191,6 +1216,13 @@ function App() {
                 <button type="button" className="secondary" onClick={removeSelectedMembers} disabled={busy || !selectedMemberIds.length}>
                   Delete Selected
                 </button>
+                <label className="ml-auto">
+                  Sort by:
+                  <select value={memberSortBy} onChange={(e) => setMemberSortBy(e.target.value as MemberSortBy)}>
+                    <option value="lastName">Last Name</option>
+                    <option value="firstName">First Name</option>
+                  </select>
+                </label>
               </div>
               <div className="table-wrap">
                 <table>
@@ -1205,18 +1237,8 @@ function App() {
                           }
                         />
                       </th>
-                      <th>
-                        <button type="button" className="tiny secondary" onClick={() => setMemberSort((prev) => ({ key: 'firstName', dir: prev.key === 'firstName' && prev.dir === 'asc' ? 'desc' : 'asc' }))}>Firstname</button>
-                      </th>
-                      <th>
-                        <button type="button" className="tiny secondary" onClick={() => setMemberSort((prev) => ({ key: 'middleName', dir: prev.key === 'middleName' && prev.dir === 'asc' ? 'desc' : 'asc' }))}>Middle</button>
-                      </th>
-                      <th>
-                        <button type="button" className="tiny secondary" onClick={() => setMemberSort((prev) => ({ key: 'lastName', dir: prev.key === 'lastName' && prev.dir === 'asc' ? 'desc' : 'asc' }))}>Lastname</button>
-                      </th>
-                      <th>
-                        <button type="button" className="tiny secondary" onClick={() => setMemberSort((prev) => ({ key: 'birthday', dir: prev.key === 'birthday' && prev.dir === 'asc' ? 'desc' : 'asc' }))}>Birthday</button>
-                      </th>
+                      <th>Name</th>
+                      <th>Birthday</th>
                       <th>Actions</th>
                     </tr>
                   </thead>
@@ -1234,9 +1256,7 @@ function App() {
                             }
                           />
                         </td>
-                        <td>{member.firstName || '-'}</td>
-                        <td>{member.middleName || '-'}</td>
-                        <td>{member.lastName || '-'}</td>
+                        <td>{formatMemberDisplayName(member, memberSortBy)}</td>
                         <td>{member.birthday || '-'}</td>
                         <td>
                           <div className="inline-actions">
