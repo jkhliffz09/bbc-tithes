@@ -128,6 +128,15 @@ function can(action) {
       'reports.export',
       'deacons.list',
     ]),
+    Pastor: new Set([
+      'members.list',
+      'members.create',
+      'entries.list',
+      'entries.create',
+      'reports.generate',
+      'reports.export',
+      'deacons.list',
+    ]),
     Accounting: new Set([
       'members.list',
       'entries.list',
@@ -164,7 +173,7 @@ function performLogout() {
 
 function requireEntryAdminApproval(payload, action, targetEntryId) {
   const role = getRole();
-  if (!['Deacon', 'Accounting'].includes(role || '')) return;
+  if (!['Deacon', 'Pastor', 'Accounting'].includes(role || '')) return;
 
   const username = String(payload?.adminUsername || '').trim();
   const password = String(payload?.adminPassword || '');
@@ -599,7 +608,7 @@ app.whenReady().then(() => {
     'entries:update',
     withErrorHandling((_event, payload) => {
       requireAuth();
-      if (['Deacon', 'Accounting'].includes(getRole() || '')) {
+      if (['Deacon', 'Pastor', 'Accounting'].includes(getRole() || '')) {
         requireEntryAdminApproval(payload, 'entries.update', payload?.id);
       } else {
         requirePermission('entries.update');
@@ -621,7 +630,7 @@ app.whenReady().then(() => {
     withErrorHandling((_event, payload) => {
       requireAuth();
       const entryId = payload?.id || payload;
-      if (['Deacon', 'Accounting'].includes(getRole() || '')) {
+      if (['Deacon', 'Pastor', 'Accounting'].includes(getRole() || '')) {
         requireEntryAdminApproval(payload, 'entries.delete', entryId);
       } else {
         requirePermission('entries.delete');
@@ -636,12 +645,15 @@ app.whenReady().then(() => {
       requirePermission('reports.generate');
       const role = getRole();
       let payload = null;
-      if (role === 'Deacon') {
+      if (role === 'Deacon' || role === 'Pastor') {
         const selectedDate = toISODate(filters?.dateFrom || filters?.dateTo) || localTodayISO();
         payload = dataService.getReport({
           dateFrom: selectedDate,
           dateTo: selectedDate,
           actualMoneyOnHand: Number(filters?.actualMoneyOnHand || 0),
+          deacon1Name: role === 'Pastor' ? String(sessionUser?.fullName || '').trim() : '',
+          deacon2Name: role === 'Pastor' ? '' : '',
+          skipDeaconInference: role === 'Pastor',
         });
       } else {
         payload = dataService.getReport({
@@ -649,7 +661,7 @@ app.whenReady().then(() => {
           dateTo: filters?.dateTo,
           adminName: String(filters?.adminName || '').trim(),
           accountingName: String(filters?.accountingName || '').trim(),
-          actualMoneyOnHand: Number(filters?.actualMoneyOnHand || 0),
+          useDeaconLooseOffering: true,
         });
       }
 
@@ -682,7 +694,7 @@ app.whenReady().then(() => {
     withErrorHandling((_event, filters) => {
       requirePermission('reports.generate');
       const role = getRole();
-      if (role === 'Deacon') {
+      if (role === 'Deacon' || role === 'Pastor') {
         const selectedDate = toISODate(filters?.dateFrom || filters?.dateTo) || localTodayISO();
         return {
           ok: true,
@@ -690,6 +702,9 @@ app.whenReady().then(() => {
             dateFrom: selectedDate,
             dateTo: selectedDate,
             actualMoneyOnHand: 0,
+            deacon1Name: role === 'Pastor' ? String(sessionUser?.fullName || '').trim() : '',
+            deacon2Name: role === 'Pastor' ? '' : '',
+            skipDeaconInference: role === 'Pastor',
           }),
         };
       }
@@ -700,7 +715,7 @@ app.whenReady().then(() => {
           dateTo: filters?.dateTo,
           adminName: String(filters?.adminName || '').trim(),
           accountingName: String(filters?.accountingName || '').trim(),
-          actualMoneyOnHand: 0,
+          useDeaconLooseOffering: true,
         }),
       };
     })
@@ -711,7 +726,7 @@ app.whenReady().then(() => {
     withErrorHandling((_event, filters) => {
       requirePermission('reports.generate');
       const role = getRole();
-      if (role === 'Deacon') {
+      if (role === 'Deacon' || role === 'Pastor') {
         const selectedDate = toISODate(filters?.dateFrom || filters?.dateTo) || localTodayISO();
         return { ok: true, data: dataService.listGeneratedReports({ dateFrom: selectedDate, dateTo: selectedDate }) };
       }
@@ -750,7 +765,7 @@ app.whenReady().then(() => {
         return { ok: true, data: { canceled: true } };
       }
 
-      if (role === 'Deacon') {
+      if (role === 'Deacon' || role === 'Pastor') {
         const selectedDate = toISODate(filters?.dateFrom || filters?.dateTo) || localTodayISO();
         return {
           ok: true,
@@ -758,6 +773,9 @@ app.whenReady().then(() => {
             dateFrom: selectedDate,
             dateTo: selectedDate,
             actualMoneyOnHand: Number(filters?.actualMoneyOnHand || 0),
+            deacon1Name: role === 'Pastor' ? String(sessionUser?.fullName || '').trim() : '',
+            deacon2Name: role === 'Pastor' ? '' : '',
+            skipDeaconInference: role === 'Pastor',
           }),
         };
       }
@@ -769,7 +787,7 @@ app.whenReady().then(() => {
           dateTo: filters?.dateTo,
           adminName: String(filters?.adminName || '').trim(),
           accountingName: String(filters?.accountingName || '').trim(),
-          actualMoneyOnHand: Number(filters?.actualMoneyOnHand || 0),
+          useDeaconLooseOffering: true,
         }),
       };
     })

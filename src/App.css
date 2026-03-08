@@ -167,7 +167,7 @@ tfoot th {
 }
 
 .status {
-  @apply my-2 rounded-lg px-3 py-2.5;
+  @apply my-2 flex items-center justify-between gap-3 rounded-lg px-3 py-2.5;
 }
 
 .status.error {

@@ -5,7 +5,7 @@ const Database = require('better-sqlite3');
 const XLSX = require('xlsx');
 
 const SERVICE_TYPES = new Set(['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']);
-const ROLE_TYPES = new Set(['Superadmin', 'Admin', 'Deacon', 'Accounting', 'Users', 'Deacons']);
+const ROLE_TYPES = new Set(['Superadmin', 'Admin', 'Deacon', 'Pastor', 'Accounting', 'Users', 'Deacons']);
 
 function valueToNumber(value) {
   if (value === null || value === undefined || value === '' || value === '-') {
@@ -32,7 +32,7 @@ function normalizeRole(role) {
   let normalized = String(role || '').trim();
   if (normalized === 'Deacons') normalized = 'Deacon';
   if (!ROLE_TYPES.has(normalized)) {
-    throw new Error('Invalid role. Allowed: Superadmin, Admin, Deacon, Accounting, Users.');
+    throw new Error('Invalid role. Allowed: Superadmin, Admin, Deacon, Pastor, Accounting, Users.');
   }
   return normalized;
 }
@@ -757,13 +757,20 @@ class DataService {
 
     const serviceDate = toDateString(payload.serviceDate);
     if (!serviceDate) throw new Error('Service date is required.');
-    const assignedDeacon1UserId = Number(payload.assignedDeacon1UserId);
-    const assignedDeacon2UserId = Number(payload.assignedDeacon2UserId);
-    if (!assignedDeacon1UserId || !assignedDeacon2UserId) {
-      throw new Error('Two assigned deacons are required.');
-    }
-    if (assignedDeacon1UserId === assignedDeacon2UserId) {
-      throw new Error('Assigned deacons must be two different users.');
+    const allowSingleAssignee = Boolean(payload.allowSingleAssignee);
+    const assignedDeacon1UserId = Number(payload.assignedDeacon1UserId || 0);
+    const assignedDeacon2UserId = payload.assignedDeacon2UserId ? Number(payload.assignedDeacon2UserId) : null;
+    if (allowSingleAssignee) {
+      if (!assignedDeacon1UserId) {
+        throw new Error('Assigned pastor is required.');
+      }
+    } else {
+      if (!assignedDeacon1UserId || !assignedDeacon2UserId) {
+        throw new Error('Two assigned deacons are required.');
+      }
+      if (assignedDeacon1UserId === assignedDeacon2UserId) {
+        throw new Error('Assigned deacons must be two different users.');
+      }
     }
 
     this.validateServiceType(payload.serviceType);
@@ -780,7 +787,7 @@ class DataService {
       serviceDate,
       serviceType: payload.serviceType,
       assignedDeacon1UserId,
-      assignedDeacon2UserId,
+      assignedDeacon2UserId: allowSingleAssignee ? null : assignedDeacon2UserId,
       tithes: valueToNumber(payload.tithes),
       faithPromise: valueToNumber(payload.faithPromise),
       looseOfferings: valueToNumber(payload.looseOfferings),
@@ -830,13 +837,20 @@ class DataService {
     if (!memberId) throw new Error('Member is required.');
     const serviceDate = toDateString(payload.serviceDate);
     if (!serviceDate) throw new Error('Service date is required.');
-    const assignedDeacon1UserId = Number(payload.assignedDeacon1UserId);
-    const assignedDeacon2UserId = Number(payload.assignedDeacon2UserId);
-    if (!assignedDeacon1UserId || !assignedDeacon2UserId) {
-      throw new Error('Two assigned deacons are required.');
-    }
-    if (assignedDeacon1UserId === assignedDeacon2UserId) {
-      throw new Error('Assigned deacons must be two different users.');
+    const allowSingleAssignee = Boolean(payload.allowSingleAssignee);
+    const assignedDeacon1UserId = Number(payload.assignedDeacon1UserId || 0);
+    const assignedDeacon2UserId = payload.assignedDeacon2UserId ? Number(payload.assignedDeacon2UserId) : null;
+    if (allowSingleAssignee) {
+      if (!assignedDeacon1UserId) {
+        throw new Error('Assigned pastor is required.');
+      }
+    } else {
+      if (!assignedDeacon1UserId || !assignedDeacon2UserId) {
+        throw new Error('Two assigned deacons are required.');
+      }
+      if (assignedDeacon1UserId === assignedDeacon2UserId) {
+        throw new Error('Assigned deacons must be two different users.');
+      }
     }
 
     this.validateServiceType(payload.serviceType);
@@ -863,7 +877,7 @@ class DataService {
         serviceDate,
         serviceType: payload.serviceType,
         assignedDeacon1UserId,
-        assignedDeacon2UserId,
+        assignedDeacon2UserId: allowSingleAssignee ? null : assignedDeacon2UserId,
         tithes: valueToNumber(payload.tithes),
         faithPromise: valueToNumber(payload.faithPromise),
         looseOfferings: valueToNumber(payload.looseOfferings),
@@ -893,6 +907,23 @@ class DataService {
     const existingNotes = String(existing.notes || '').trim();
     const notes = incomingNotes || existingNotes || null;
 
+    const allowSingleAssignee = Boolean(payload.allowSingleAssignee);
+    const assignedDeacon1UserId = Number(payload.assignedDeacon1UserId || existing.assignedDeacon1UserId || 0);
+    const assignedDeacon2UserId = allowSingleAssignee
+      ? null
+      : Number(payload.assignedDeacon2UserId || existing.assignedDeacon2UserId || 0);
+    if (allowSingleAssignee && !assignedDeacon1UserId) {
+      throw new Error('Assigned pastor is required.');
+    }
+    if (!allowSingleAssignee) {
+      if (!assignedDeacon1UserId || !assignedDeacon2UserId) {
+        throw new Error('Two assigned deacons are required.');
+      }
+      if (assignedDeacon1UserId === assignedDeacon2UserId) {
+        throw new Error('Assigned deacons must be two different users.');
+      }
+    }
+
     this.db
       .prepare(
         `UPDATE entries
@@ -908,8 +939,8 @@ class DataService {
       )
       .run({
         id,
-        assignedDeacon1UserId: Number(payload.assignedDeacon1UserId || existing.assignedDeacon1UserId || 0),
-        assignedDeacon2UserId: Number(payload.assignedDeacon2UserId || existing.assignedDeacon2UserId || 0),
+        assignedDeacon1UserId,
+        assignedDeacon2UserId,
         serviceType: String(payload.serviceType || existing.serviceType || 'Sunday'),
         tithes,
         faithPromise,
@@ -958,6 +989,51 @@ class DataService {
     };
   }
 
+  getDeaconLooseOfferingSummary(dateFrom, dateTo) {
+    const rows = this.db
+      .prepare(
+        `SELECT id, date_from AS dateFrom, date_to AS dateTo, report_json AS reportJson, created_at AS createdAt
+         FROM generated_reports
+         WHERE date_from >= @dateFrom AND date_to <= @dateTo
+         ORDER BY created_at DESC, id DESC`
+      )
+      .all({ dateFrom, dateTo });
+
+    const byDate = new Map();
+    for (const row of rows) {
+      let report = null;
+      try {
+        report = JSON.parse(String(row.reportJson || '{}'));
+      } catch {
+        report = null;
+      }
+      if (!report) continue;
+      const rDateFrom = String(report.dateFrom || row.dateFrom || '').trim();
+      const rDateTo = String(report.dateTo || row.dateTo || '').trim();
+      if (!rDateFrom || !rDateTo || rDateFrom !== rDateTo) continue;
+      const signatory = report.signatory || {};
+      const isDeaconGenerated =
+        !String(signatory.adminName || '').trim() &&
+        !String(signatory.accountingName || '').trim() &&
+        (!!String(signatory.deacon1Name || '').trim() || !!String(signatory.deacon2Name || '').trim());
+      if (!isDeaconGenerated) continue;
+      if (!byDate.has(rDateFrom)) {
+        byDate.set(rDateFrom, {
+          loose: valueToNumber(report?.summary?.looseOfferings),
+          audited: valueToNumber(report?.summary?.auditedAmount),
+        });
+      }
+    }
+
+    let looseOfferings = 0;
+    let auditedAmount = 0;
+    for (const item of byDate.values()) {
+      looseOfferings += valueToNumber(item.loose);
+      auditedAmount += valueToNumber(item.audited);
+    }
+    return { looseOfferings, auditedAmount };
+  }
+
   getReport(filters = {}) {
     const dateFrom = toDateString(filters.dateFrom) || '1900-01-01';
     const dateTo = toDateString(filters.dateTo) || '2999-12-31';
@@ -993,8 +1069,15 @@ class DataService {
       .get({ dateFrom, dateTo });
 
     const auditedAmount = valueToNumber(summary?.total);
-    const actualMoneyOnHand = valueToNumber(filters.actualMoneyOnHand);
-    const looseOfferings = auditedAmount - actualMoneyOnHand;
+    const useDeaconLooseOffering = Boolean(filters.useDeaconLooseOffering);
+    const looseFromDeacons = useDeaconLooseOffering
+      ? this.getDeaconLooseOfferingSummary(dateFrom, dateTo).looseOfferings
+      : null;
+    const looseOfferings =
+      looseFromDeacons === null
+        ? auditedAmount - valueToNumber(filters.actualMoneyOnHand)
+        : valueToNumber(looseFromDeacons);
+    const actualMoneyOnHand = auditedAmount - looseOfferings;
 
     const signatory = {
       adminName: String(filters.adminName || '').trim(),
@@ -1003,7 +1086,7 @@ class DataService {
       deacon2Name: String(filters.deacon2Name || '').trim(),
     };
 
-    if (!signatory.deacon1Name || !signatory.deacon2Name) {
+    if (!filters.skipDeaconInference && (!signatory.deacon1Name || !signatory.deacon2Name)) {
       const inferred = this.inferDeaconSignatories(dateFrom, dateTo);
       if (!signatory.deacon1Name) signatory.deacon1Name = inferred.deacon1Name;
       if (!signatory.deacon2Name) signatory.deacon2Name = inferred.deacon2Name;

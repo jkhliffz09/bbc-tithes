@@ -40,7 +40,7 @@ type UserForm = {
 };
 
 type PendingEntryAction =
-  | { type: 'update'; payload: { id: number; memberId: number; serviceDate: string; serviceType: ServiceType; assignedDeacon1UserId: number; assignedDeacon2UserId: number; tithes: number; faithPromise: number; thanksgiving: number; notes: string } }
+  | { type: 'update'; payload: { id: number; memberId: number; serviceDate: string; serviceType: ServiceType; assignedDeacon1UserId: number; assignedDeacon2UserId: number | null; allowSingleAssignee?: boolean; tithes: number; faithPromise: number; thanksgiving: number; notes: string } }
   | { type: 'delete'; entryId: number };
 
 type DuplicateEntryDialog = {
@@ -50,7 +50,8 @@ type DuplicateEntryDialog = {
     serviceDate: string;
     serviceType: ServiceType;
     assignedDeacon1UserId: number;
-    assignedDeacon2UserId: number;
+    assignedDeacon2UserId: number | null;
+    allowSingleAssignee?: boolean;
     tithes: number;
     faithPromise: number;
     thanksgiving: number;
@@ -74,7 +75,7 @@ const SYNC_STORAGE_KEYS = {
   passphrase: 'faithflow.sync.passphrase',
 };
 
-const ROLE_OPTIONS: Role[] = ['Superadmin', 'Admin', 'Deacon', 'Accounting', 'Users'];
+const ROLE_OPTIONS: Role[] = ['Superadmin', 'Admin', 'Deacon', 'Pastor', 'Accounting', 'Users'];
 
 function toISODate(d: Date): string {
   return d.toISOString().slice(0, 10);
@@ -136,6 +137,7 @@ function normalizeRole(role: unknown): Role | null {
   if (value === 'superadmin') return 'Superadmin';
   if (value === 'admin') return 'Admin';
   if (value === 'deacons' || value === 'deacon') return 'Deacon';
+  if (value === 'pastor') return 'Pastor';
   if (value === 'accounting') return 'Accounting';
   if (value === 'users' || value === 'user') return 'Users';
   return null;
@@ -192,7 +194,7 @@ function formatMemberDisplayName(member: Member, sortBy: MemberSortBy): string {
 }
 
 function requiresAdminEntryApproval(role: Role | null): boolean {
-  return role === 'Deacon' || role === 'Accounting';
+  return role === 'Deacon' || role === 'Pastor' || role === 'Accounting';
 }
 
 function can(roleInput: Role | string | null, action: string): boolean {
@@ -238,6 +240,15 @@ function can(roleInput: Role | string | null, action: string): boolean {
       'deacons.list',
     ]),
     Deacon: new Set([
+      'members.list',
+      'members.create',
+      'entries.list',
+      'entries.create',
+      'reports.generate',
+      'reports.export',
+      'deacons.list',
+    ]),
+    Pastor: new Set([
       'members.list',
       'members.create',
       'entries.list',
@@ -455,13 +466,13 @@ function App() {
 
   async function generateReport() {
     if (!can(authUser?.role || null, 'reports.generate')) return;
-    if (!String(reportAudit.actualMoneyOnHand).trim()) {
+    const role = normalizeRole(authUser?.role);
+    if ((role === 'Deacon' || role === 'Pastor') && !String(reportAudit.actualMoneyOnHand).trim()) {
       setError('Actual Money On Hand is required.');
       return;
     }
-    const role = normalizeRole(authUser?.role);
     const filters =
-      role === 'Deacon'
+      role === 'Deacon' || role === 'Pastor'
         ? {
             dateFrom: reportRange.dateFrom,
             dateTo: reportRange.dateFrom,
@@ -471,7 +482,7 @@ function App() {
             ...reportRange,
             adminName: authUser?.fullName || '',
             accountingName: '',
-            actualMoneyOnHand: amount(reportAudit.actualMoneyOnHand),
+            useDeaconLooseOffering: true,
           };
     const result = await run('', () => window.faithflow.generateReport(filters));
     if (!result) return;
@@ -488,13 +499,14 @@ function App() {
     if (!can(authUser?.role || null, 'reports.generate')) return;
     const role = normalizeRole(authUser?.role);
     const filters =
-      role === 'Deacon'
+      role === 'Deacon' || role === 'Pastor'
         ? { dateFrom: reportRange.dateFrom, dateTo: reportRange.dateFrom }
         : {
             dateFrom: reportRange.dateFrom,
             dateTo: reportRange.dateTo,
             adminName: authUser?.fullName || '',
             accountingName: '',
+            useDeaconLooseOffering: true,
           };
     const data = await run('', () => window.faithflow.previewReport(filters));
     if (data) setReportPreview(data);
@@ -504,7 +516,7 @@ function App() {
     if (!can(authUser?.role || null, 'reports.generate')) return;
     const role = normalizeRole(authUser?.role);
     const filters =
-      role === 'Deacon'
+      role === 'Deacon' || role === 'Pastor'
         ? { dateFrom: reportRange.dateFrom, dateTo: reportRange.dateFrom }
         : { dateFrom: reportRange.dateFrom, dateTo: reportRange.dateTo };
     const data = await run('', () => window.faithflow.listGeneratedReports(filters));
@@ -607,7 +619,7 @@ function App() {
     void seedNextMemberCode();
     void loadUsers();
     void loadDeacons();
-    if (role !== 'Deacon') {
+    if (role !== 'Deacon' && role !== 'Pastor') {
       void loadGeneratedReports();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -621,6 +633,7 @@ function App() {
   }, [reportRange.dateFrom, reportRange.dateTo, authUser?.id]);
 
   useEffect(() => {
+    if (normalizeRole(authUser?.role) === 'Pastor') return;
     if (deacons.length < 2) return;
     setEntryForm((prev) => {
       const d1 = prev.assignedDeacon1UserId || deacons[0].id;
@@ -631,7 +644,7 @@ function App() {
       }
       return { ...prev, assignedDeacon1UserId: d1, assignedDeacon2UserId: d2 };
     });
-  }, [deacons]);
+  }, [deacons, authUser?.role]);
 
   async function login(event: FormEvent) {
     event.preventDefault();
@@ -817,12 +830,20 @@ function App() {
       setError('Please select a member from autocomplete results.');
       return;
     }
-    if (!entryForm.assignedDeacon1UserId || !entryForm.assignedDeacon2UserId) {
-      setError('Please assign two deacons.');
-      return;
-    }
-    if (entryForm.assignedDeacon1UserId === entryForm.assignedDeacon2UserId) {
-      setError('Assigned deacons must be two different users.');
+    const currentRole = normalizeRole(authUser?.role);
+    const isPastor = currentRole === 'Pastor';
+    const pastorUserId = Number(authUser?.id || 0);
+    if (!isPastor) {
+      if (!entryForm.assignedDeacon1UserId || !entryForm.assignedDeacon2UserId) {
+        setError('Please assign two deacons.');
+        return;
+      }
+      if (entryForm.assignedDeacon1UserId === entryForm.assignedDeacon2UserId) {
+        setError('Assigned deacons must be two different users.');
+        return;
+      }
+    } else if (!pastorUserId) {
+      setError('Pastor account is invalid.');
       return;
     }
 
@@ -830,8 +851,9 @@ function App() {
       memberId: entryForm.memberId,
       serviceDate: entryForm.serviceDate,
       serviceType: deriveServiceTypeFromDate(entryForm.serviceDate),
-      assignedDeacon1UserId: entryForm.assignedDeacon1UserId,
-      assignedDeacon2UserId: entryForm.assignedDeacon2UserId,
+      assignedDeacon1UserId: isPastor ? pastorUserId : entryForm.assignedDeacon1UserId,
+      assignedDeacon2UserId: isPastor ? null : entryForm.assignedDeacon2UserId,
+      allowSingleAssignee: isPastor,
       tithes: amount(entryForm.tithes),
       faithPromise: amount(entryForm.faithPromise),
       thanksgiving: amount(entryForm.thanksgiving),
@@ -862,8 +884,8 @@ function App() {
       ...emptyEntryForm,
       serviceDate: entryForm.serviceDate,
       serviceType: deriveServiceTypeFromDate(entryForm.serviceDate),
-      assignedDeacon1UserId: entryForm.assignedDeacon1UserId,
-      assignedDeacon2UserId: entryForm.assignedDeacon2UserId,
+      assignedDeacon1UserId: isPastor ? pastorUserId : entryForm.assignedDeacon1UserId,
+      assignedDeacon2UserId: isPastor ? 0 : entryForm.assignedDeacon2UserId,
     });
     setMemberEntrySearch('');
     await loadEntries();
@@ -873,12 +895,20 @@ function App() {
     event.preventDefault();
     if (!duplicateDialog) return;
     const { existing, payload } = duplicateDialog;
+    const currentRole = normalizeRole(authUser?.role);
+    const isPastor = currentRole === 'Pastor';
+    const pastorUserId = Number(authUser?.id || 0);
 
     const fillPayload = {
       id: existing.id,
       serviceType: existing.serviceType,
-      assignedDeacon1UserId: existing.assignedDeacon1UserId || payload.assignedDeacon1UserId,
-      assignedDeacon2UserId: existing.assignedDeacon2UserId || payload.assignedDeacon2UserId,
+      assignedDeacon1UserId: isPastor
+        ? pastorUserId
+        : (existing.assignedDeacon1UserId || payload.assignedDeacon1UserId),
+      assignedDeacon2UserId: isPastor
+        ? null
+        : (existing.assignedDeacon2UserId || payload.assignedDeacon2UserId),
+      allowSingleAssignee: isPastor,
       tithes: payload.tithes,
       faithPromise: payload.faithPromise,
       thanksgiving: payload.thanksgiving,
@@ -894,7 +924,7 @@ function App() {
       serviceDate: existing.serviceDate,
       serviceType: deriveServiceTypeFromDate(existing.serviceDate),
       assignedDeacon1UserId: fillPayload.assignedDeacon1UserId,
-      assignedDeacon2UserId: fillPayload.assignedDeacon2UserId,
+      assignedDeacon2UserId: fillPayload.assignedDeacon2UserId || 0,
     });
     setMemberEntrySearch('');
     await loadEntries(existing.serviceDate);
@@ -944,7 +974,7 @@ function App() {
         serviceDate: pendingEntryAction.payload.serviceDate,
         serviceType: deriveServiceTypeFromDate(pendingEntryAction.payload.serviceDate),
         assignedDeacon1UserId: pendingEntryAction.payload.assignedDeacon1UserId,
-        assignedDeacon2UserId: pendingEntryAction.payload.assignedDeacon2UserId,
+        assignedDeacon2UserId: pendingEntryAction.payload.assignedDeacon2UserId || 0,
       });
       setMemberEntrySearch('');
     } else {
@@ -990,13 +1020,13 @@ function App() {
   }
 
   async function exportReportExcel() {
-    if (!String(reportAudit.actualMoneyOnHand).trim()) {
+    const role = normalizeRole(authUser?.role);
+    if ((role === 'Deacon' || role === 'Pastor') && !String(reportAudit.actualMoneyOnHand).trim()) {
       setError('Actual Money On Hand is required.');
       return;
     }
-    const role = normalizeRole(authUser?.role);
     const filters =
-      role === 'Deacon'
+      role === 'Deacon' || role === 'Pastor'
         ? {
             dateFrom: reportRange.dateFrom,
             dateTo: reportRange.dateFrom,
@@ -1006,7 +1036,7 @@ function App() {
             ...reportRange,
             adminName: authUser?.fullName || '',
             accountingName: '',
-            actualMoneyOnHand: amount(reportAudit.actualMoneyOnHand),
+            useDeaconLooseOffering: true,
           };
     const result = await run('', () => window.faithflow.exportReportExcel(filters));
     if (!result || result.canceled) return;
@@ -1014,7 +1044,8 @@ function App() {
   }
 
   async function exportReportPdf() {
-    if (!String(reportAudit.actualMoneyOnHand).trim()) {
+    const role = normalizeRole(authUser?.role);
+    if ((role === 'Deacon' || role === 'Pastor') && !String(reportAudit.actualMoneyOnHand).trim()) {
       setError('Actual Money On Hand is required.');
       return;
     }
@@ -1076,14 +1107,20 @@ function App() {
               Sign In
             </button>
           </form>
-          {error && <p className="status error">{error}</p>}
+          {error && (
+            <div className="status error">
+              <span>{error}</span>
+              <button type="button" className="secondary tiny" onClick={() => setError('')}>OK</button>
+            </div>
+          )}
         </section>
       </div>
     );
   }
 
   const role = normalizeRole(authUser.role);
-  const isDeaconRole = role === 'Deacon';
+  const isPastorRole = role === 'Pastor';
+  const isDeaconRole = role === 'Deacon' || role === 'Pastor';
   const reportDeacon1 = reportPreview?.signatory.deacon1Name || report?.signatory.deacon1Name || '';
   const reportDeacon2 = reportPreview?.signatory.deacon2Name || report?.signatory.deacon2Name || '';
   const canEditEntries = can(role, 'entries.update') || requiresAdminEntryApproval(role);
@@ -1115,8 +1152,18 @@ function App() {
         )}
       </nav>
 
-      {error && <p className="status error">{error}</p>}
-      {toast && <p className="status success">{toast}</p>}
+      {error && (
+        <div className="status error">
+          <span>{error}</span>
+          <button type="button" className="secondary tiny" onClick={() => setError('')}>OK</button>
+        </div>
+      )}
+      {toast && (
+        <div className="status success">
+          <span>{toast}</span>
+          <button type="button" className="secondary tiny" onClick={() => setToast('')}>OK</button>
+        </div>
+      )}
 
       <main className="content">
         {tab === 'members' && (
@@ -1216,8 +1263,8 @@ function App() {
                 <button type="button" className="secondary" onClick={removeSelectedMembers} disabled={busy || !selectedMemberIds.length}>
                   Delete Selected
                 </button>
-                <label className="ml-auto">
-                  Sort by:
+                <label className="ml-auto flex items-center gap-2 whitespace-nowrap">
+                  <span>Sort by:</span>
                   <select value={memberSortBy} onChange={(e) => setMemberSortBy(e.target.value as MemberSortBy)}>
                     <option value="lastName">Last Name</option>
                     <option value="firstName">First Name</option>
@@ -1317,38 +1364,45 @@ function App() {
                   </div>
                 )}
 
-                <div className="grid-inline">
+                {isPastorRole ? (
                   <label>
-                    Assigned Deacon 1 *
-                    <select
-                      value={entryForm.assignedDeacon1UserId || ''}
-                      onChange={(e) => setEntryForm((p) => ({ ...p, assignedDeacon1UserId: Number(e.target.value || 0) }))}
-                      required
-                    >
-                      <option value="">Select deacon</option>
-                      {deacons.map((d) => (
-                        <option key={d.id} value={d.id}>
-                          {d.fullName}
-                        </option>
-                      ))}
-                    </select>
+                    Assigned Pastor
+                    <input value={authUser.fullName} readOnly />
                   </label>
-                  <label>
-                    Assigned Deacon 2 *
-                    <select
-                      value={entryForm.assignedDeacon2UserId || ''}
-                      onChange={(e) => setEntryForm((p) => ({ ...p, assignedDeacon2UserId: Number(e.target.value || 0) }))}
-                      required
-                    >
-                      <option value="">Select deacon</option>
-                      {deacons.map((d) => (
-                        <option key={d.id} value={d.id}>
-                          {d.fullName}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                </div>
+                ) : (
+                  <div className="grid-inline">
+                    <label>
+                      Assigned Deacon 1 *
+                      <select
+                        value={entryForm.assignedDeacon1UserId || ''}
+                        onChange={(e) => setEntryForm((p) => ({ ...p, assignedDeacon1UserId: Number(e.target.value || 0) }))}
+                        required
+                      >
+                        <option value="">Select deacon</option>
+                        {deacons.map((d) => (
+                          <option key={d.id} value={d.id}>
+                            {d.fullName}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      Assigned Deacon 2 *
+                      <select
+                        value={entryForm.assignedDeacon2UserId || ''}
+                        onChange={(e) => setEntryForm((p) => ({ ...p, assignedDeacon2UserId: Number(e.target.value || 0) }))}
+                        required
+                      >
+                        <option value="">Select deacon</option>
+                        {deacons.map((d) => (
+                          <option key={d.id} value={d.id}>
+                            {d.fullName}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                )}
 
                 <label>
                   Date *
@@ -1519,7 +1573,12 @@ function App() {
                     </label>
                   </div>
                 )}
-                {isDeaconRole ? (
+                {isPastorRole ? (
+                  <label>
+                    Signatory Pastor
+                    <input value={authUser.fullName} readOnly />
+                  </label>
+                ) : isDeaconRole ? (
                   <div className="form">
                     <label>
                       Signatory Deacon 1
@@ -1536,26 +1595,42 @@ function App() {
                     <input value={authUser.fullName} readOnly />
                   </label>
                 )}
-                <label>
-                  Total Audited Amount
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={String(reportPreview?.summary.auditedAmount ?? report?.summary.auditedAmount ?? 0)}
-                    readOnly
-                  />
-                </label>
-                <label>
-                  Actual Money On Hand
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={reportAudit.actualMoneyOnHand}
-                    onChange={(e) => setReportAudit((p) => ({ ...p, actualMoneyOnHand: e.target.value }))}
-                  />
-                </label>
+                {isDeaconRole && (
+                  <>
+                    <label>
+                      Total Audited Amount
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={String(reportPreview?.summary.auditedAmount ?? report?.summary.auditedAmount ?? 0)}
+                        readOnly
+                      />
+                    </label>
+                    <label>
+                      Actual Money On Hand
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={reportAudit.actualMoneyOnHand}
+                        onChange={(e) => setReportAudit((p) => ({ ...p, actualMoneyOnHand: e.target.value }))}
+                      />
+                    </label>
+                  </>
+                )}
+                {!isDeaconRole && (
+                  <label>
+                    Loose Offerings (from Deacon Generated Reports)
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={String(reportPreview?.summary.looseOfferings ?? report?.summary.looseOfferings ?? 0)}
+                      readOnly
+                    />
+                  </label>
+                )}
                 <div className="row-actions">
                   <button onClick={generateReport} disabled={busy || !can(role, 'reports.generate')}>Generate</button>
                   <button className="secondary" onClick={printReport} title="Print">🖨</button>
@@ -1683,13 +1758,19 @@ function App() {
                         <small>Signatory</small>
                       </div>
                     )}
-                    {isDeaconRole && !!report.signatory.deacon1Name && (
+                    {isPastorRole && !!report.signatory.deacon1Name && (
+                      <div className="signatory-line">
+                        <span>{report.signatory.deacon1Name}</span>
+                        <small>Pastor Signatory</small>
+                      </div>
+                    )}
+                    {!isPastorRole && isDeaconRole && !!report.signatory.deacon1Name && (
                       <div className="signatory-line">
                         <span>{report.signatory.deacon1Name}</span>
                         <small>Deacon Signatory 1</small>
                       </div>
                     )}
-                    {isDeaconRole && !!report.signatory.deacon2Name && (
+                    {!isPastorRole && isDeaconRole && !!report.signatory.deacon2Name && (
                       <div className="signatory-line">
                         <span>{report.signatory.deacon2Name}</span>
                         <small>Deacon Signatory 2</small>
