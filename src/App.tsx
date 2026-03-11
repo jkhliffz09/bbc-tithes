@@ -61,6 +61,7 @@ type DuplicateEntryDialog = {
 
 type SyncDialogMode = 'upload' | 'download' | null;
 type MemberSortBy = 'firstName' | 'lastName';
+type MemberEntryViewMode = 'list' | 'calendar';
 type SyncConfig = {
   serverUrl: string;
   apiToken: string;
@@ -193,6 +194,16 @@ function formatMemberDisplayName(member: Member, sortBy: MemberSortBy): string {
   return [firstName, mid, lastName, suffix].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
 }
 
+function formatMemberDateLabel(dateStr: string): string {
+  const d = new Date(`${dateStr}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return dateStr;
+  return new Intl.DateTimeFormat('en-PH', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  }).format(d);
+}
+
 function requiresAdminEntryApproval(role: Role | null): boolean {
   return role === 'Deacon' || role === 'Pastor' || role === 'Accounting';
 }
@@ -295,6 +306,10 @@ function App() {
   const [memberForm, setMemberForm] = useState<MemberForm>(emptyMemberForm);
   const [selectedMemberIds, setSelectedMemberIds] = useState<number[]>([]);
   const [memberSortBy, setMemberSortBy] = useState<MemberSortBy>('lastName');
+  const [viewingMember, setViewingMember] = useState<Member | null>(null);
+  const [memberEntryRange, setMemberEntryRange] = useState({ dateFrom: '', dateTo: '' });
+  const [memberEntries, setMemberEntries] = useState<Entry[]>([]);
+  const [memberEntryViewMode, setMemberEntryViewMode] = useState<MemberEntryViewMode>('list');
 
   const [memberEntrySearch, setMemberEntrySearch] = useState('');
   const [selectedDate, setSelectedDate] = useState(initialDate);
@@ -440,6 +455,23 @@ function App() {
   const monthGrandTotal =
     monthTotals.tithes + monthTotals.faithPromise + monthTotals.thanksgiving;
 
+  const memberEntryTotals = memberEntries.reduce(
+    (acc, entry) => {
+      acc.tithes += entry.tithes || 0;
+      acc.faithPromise += entry.faithPromise || 0;
+      acc.thanksgiving += entry.thanksgiving || 0;
+      return acc;
+    },
+    { tithes: 0, faithPromise: 0, thanksgiving: 0 }
+  );
+
+  const memberCalendarGroups = memberEntries.reduce<Record<string, Entry[]>>((acc, entry) => {
+    const key = entry.serviceDate.slice(0, 7);
+    if (!acc[key]) acc[key] = [];
+    acc[key].push(entry);
+    return acc;
+  }, {});
+
   async function loadUsers() {
     if (!can(authUser?.role || null, 'users.manage')) return;
     const data = await run('', () => window.faithflow.listUsers());
@@ -462,6 +494,21 @@ function App() {
     if (!can(authUser?.role || null, 'entries.list')) return;
     const data = await run('', () => window.faithflow.listEntries({ date }));
     if (data) setEntries(data);
+  }
+
+  async function loadMemberEntries(member: Member, range = memberEntryRange) {
+    if (!can(authUser?.role || null, 'entries.list')) return;
+    const data = await run('', () =>
+      window.faithflow.listEntries({
+        memberId: member.id,
+        dateFrom: range.dateFrom || undefined,
+        dateTo: range.dateTo || undefined,
+      })
+    );
+    if (data) {
+      setViewingMember(member);
+      setMemberEntries(data);
+    }
   }
 
   async function generateReport() {
@@ -633,6 +680,12 @@ function App() {
   }, [reportRange.dateFrom, reportRange.dateTo, authUser?.id]);
 
   useEffect(() => {
+    if (!viewingMember) return;
+    void loadMemberEntries(viewingMember, memberEntryRange);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [memberEntryRange.dateFrom, memberEntryRange.dateTo]);
+
+  useEffect(() => {
     if (normalizeRole(authUser?.role) === 'Pastor') return;
     if (deacons.length < 2) return;
     setEntryForm((prev) => {
@@ -764,9 +817,12 @@ function App() {
     };
 
     if (memberForm.id) {
-      await run('Member updated successfully.', () =>
+      const updated = await run('Member updated successfully.', () =>
         window.faithflow.updateMember({ id: memberForm.id as number, ...payload })
       );
+      if (updated && viewingMember?.id === updated.id) {
+        setViewingMember(updated);
+      }
     } else {
       await run('Member added successfully.', () => window.faithflow.createMember(payload));
     }
@@ -781,6 +837,10 @@ function App() {
     const ok = window.confirm('Delete this member and all related giving records?');
     if (!ok) return;
     await run('Member deleted.', () => window.faithflow.deleteMember(id));
+    if (viewingMember?.id === id) {
+      setViewingMember(null);
+      setMemberEntries([]);
+    }
     setMemberForm(emptyMemberForm);
     setSelectedMemberIds((prev) => prev.filter((x) => x !== id));
     await loadMembers('');
@@ -801,6 +861,19 @@ function App() {
       address: member.address || '',
     });
     setTab('members');
+  }
+
+  async function viewMember(member: Member) {
+    const dateTo = initialDate;
+    const dateFrom = new Date();
+    dateFrom.setMonth(dateFrom.getMonth() - 3);
+    const nextRange = {
+      dateFrom: toISODate(dateFrom),
+      dateTo,
+    };
+    setMemberEntryRange(nextRange);
+    setMemberEntryViewMode('list');
+    await loadMemberEntries(member, nextRange);
   }
 
   function resetMemberForm() {
@@ -1166,7 +1239,7 @@ function App() {
       )}
 
       <main className="content">
-        {tab === 'members' && (
+        {tab === 'members' && !viewingMember && (
           <section className="panel grid-2 split-panels">
             <article>
               <h2>{memberForm.id ? 'Edit Member' : 'Add Member'}</h2>
@@ -1307,6 +1380,7 @@ function App() {
                         <td>{member.birthday || '-'}</td>
                         <td>
                           <div className="inline-actions">
+                            <button type="button" className="tiny secondary" onClick={() => void viewMember(member)}>View</button>
                             {can(role, 'members.update') && <button type="button" className="tiny" onClick={() => editMember(member)}>Edit</button>}
                             {can(role, 'members.delete') && <button type="button" className="tiny danger" onClick={() => removeMember(member.id)}>Delete</button>}
                           </div>
@@ -1317,6 +1391,177 @@ function App() {
                 </table>
               </div>
             </article>
+          </section>
+        )}
+
+        {tab === 'members' && viewingMember && (
+          <section className="member-view-layout">
+            <div className="member-view-header">
+              <div>
+                <h2>{viewingMember.fullName}</h2>
+                <p className="muted">Member profile, giving history, and activity view.</p>
+              </div>
+              <div className="row-actions">
+                <button type="button" className="secondary" onClick={() => setViewingMember(null)}>Back to Members</button>
+                {can(role, 'members.update') && <button type="button" onClick={() => editMember(viewingMember)}>Edit Member</button>}
+              </div>
+            </div>
+
+            <section className="member-view-grid">
+              <article className="member-card">
+                <h3>Personal Info</h3>
+                <div className="member-info-grid">
+                  <div>
+                    <small className="muted">Full Name</small>
+                    <strong>{viewingMember.fullName}</strong>
+                  </div>
+                  <div>
+                    <small className="muted">Birthday</small>
+                    <strong>{viewingMember.birthday || '-'}</strong>
+                  </div>
+                  <div>
+                    <small className="muted">Contact Number</small>
+                    <strong>{viewingMember.contact || '-'}</strong>
+                  </div>
+                  <div>
+                    <small className="muted">Address</small>
+                    <strong>{viewingMember.address || '-'}</strong>
+                  </div>
+                </div>
+
+                <h3 className="member-section-title">Membership Info</h3>
+                <div className="member-info-grid">
+                  <div>
+                    <small className="muted">Member ID</small>
+                    <strong>{viewingMember.memberCode || '-'}</strong>
+                  </div>
+                  <div>
+                    <small className="muted">Created</small>
+                    <strong>{formatMemberDateLabel(viewingMember.createdAt.slice(0, 10))}</strong>
+                  </div>
+                  <div>
+                    <small className="muted">Updated</small>
+                    <strong>{formatMemberDateLabel(viewingMember.updatedAt.slice(0, 10))}</strong>
+                  </div>
+                </div>
+              </article>
+
+              <article className="member-card">
+                <div className="member-entries-header">
+                  <div>
+                    <h3>Giving Entries</h3>
+                    <p className="muted">Filter by date range and switch between list or calendar view.</p>
+                  </div>
+                  <div className="row-actions">
+                    <button
+                      type="button"
+                      className={memberEntryViewMode === 'list' ? '' : 'secondary'}
+                      onClick={() => setMemberEntryViewMode('list')}
+                    >
+                      List
+                    </button>
+                    <button
+                      type="button"
+                      className={memberEntryViewMode === 'calendar' ? '' : 'secondary'}
+                      onClick={() => setMemberEntryViewMode('calendar')}
+                    >
+                      Calendar
+                    </button>
+                  </div>
+                </div>
+
+                <div className="member-filter-row">
+                  <label>
+                    From
+                    <input
+                      type="date"
+                      value={memberEntryRange.dateFrom}
+                      onChange={(e) => setMemberEntryRange((prev) => ({ ...prev, dateFrom: e.target.value }))}
+                    />
+                  </label>
+                  <label>
+                    To
+                    <input
+                      type="date"
+                      value={memberEntryRange.dateTo}
+                      onChange={(e) => setMemberEntryRange((prev) => ({ ...prev, dateTo: e.target.value }))}
+                    />
+                  </label>
+                </div>
+
+                <div className="totals member-entry-totals">
+                  <div>Tithes: {money(memberEntryTotals.tithes)}</div>
+                  <div>Faith Promise: {money(memberEntryTotals.faithPromise)}</div>
+                  <div>Thanksgiving: {money(memberEntryTotals.thanksgiving)}</div>
+                  <div className="grand">
+                    Total: {money(memberEntryTotals.tithes + memberEntryTotals.faithPromise + memberEntryTotals.thanksgiving)}
+                  </div>
+                </div>
+
+                {memberEntryViewMode === 'list' && (
+                  <div className="table-wrap">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Date</th>
+                          <th>Service Day</th>
+                          <th>Giving</th>
+                          <th>Total</th>
+                          <th>Notes</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {memberEntries.map((entry) => (
+                          <tr key={entry.id}>
+                            <td>{entry.serviceDate}</td>
+                            <td>{entry.serviceType}</td>
+                            <td>
+                              <div className="text-xs">
+                                {entry.tithes > 0 && <div>TITHES: {money(entry.tithes)}</div>}
+                                {entry.faithPromise > 0 && <div>FAITH PROMISE: {money(entry.faithPromise)}</div>}
+                                {entry.thanksgiving > 0 && <div>THANKSGIVING: {money(entry.thanksgiving)}</div>}
+                              </div>
+                            </td>
+                            <td>{money(entry.tithes + entry.faithPromise + entry.thanksgiving)}</td>
+                            <td>{entry.notes || '-'}</td>
+                          </tr>
+                        ))}
+                        {memberEntries.length === 0 && (
+                          <tr>
+                            <td colSpan={5} className="muted">No giving entries in this date range.</td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                {memberEntryViewMode === 'calendar' && (
+                  <div className="member-calendar">
+                    {Object.entries(memberCalendarGroups).map(([monthKey, monthEntries]) => (
+                      <section key={monthKey} className="calendar-month">
+                        <h4>{monthKey}</h4>
+                        <div className="calendar-grid">
+                          {monthEntries.map((entry) => (
+                            <article key={entry.id} className="calendar-card">
+                              <strong>{formatMemberDateLabel(entry.serviceDate)}</strong>
+                              <small className="muted">{entry.serviceType}</small>
+                              {entry.tithes > 0 && <div>Tithes: {money(entry.tithes)}</div>}
+                              {entry.faithPromise > 0 && <div>Faith Promise: {money(entry.faithPromise)}</div>}
+                              {entry.thanksgiving > 0 && <div>Thanksgiving: {money(entry.thanksgiving)}</div>}
+                              <div className="calendar-total">Total: {money(entry.tithes + entry.faithPromise + entry.thanksgiving)}</div>
+                            </article>
+                          ))}
+                        </div>
+                      </section>
+                    ))}
+                    {memberEntries.length === 0 && (
+                      <p className="muted">No giving entries in this date range.</p>
+                    )}
+                  </div>
+                )}
+              </article>
+            </section>
           </section>
         )}
 

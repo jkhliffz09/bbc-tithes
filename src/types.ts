@@ -136,7 +136,7 @@ declare global {
       updateMember: (payload: Partial<Member> & { id: number }) => Promise<Member>;
       deleteMember: (id: number) => Promise<{ success: true }>;
 
-      listEntries: (filters: { month?: string; date?: string; memberId?: number }) => Promise<Entry[]>;
+      listEntries: (filters: { month?: string; date?: string; dateFrom?: string; dateTo?: string; memberId?: number }) => Promise<Entry[]>;
       createEntry: (payload: Partial<Entry> & { allowSingleAssignee?: boolean }) => Promise<Entry>;
       updateEntry: (payload: Partial<Entry> & { id: number; allowSingleAssignee?: boolean; adminUsername?: string; adminPassword?: string; adminNote?: string }) => Promise<Entry>;
       fillEntryEmptyFields: (payload: Partial<Entry> & { id: number; allowSingleAssignee?: boolean }) => Promise<Entry>;

@@ -698,6 +698,8 @@ class DataService {
   listEntries(filters = {}) {
     const month = String(filters.month || '').trim();
     const date = toDateString(filters.date);
+    const dateFrom = toDateString(filters.dateFrom);
+    const dateTo = toDateString(filters.dateTo);
     const memberId = Number(filters.memberId || 0);
 
     const conditions = [];
@@ -711,6 +713,16 @@ class DataService {
     if (date) {
       conditions.push('e.service_date = @date');
       params.date = date;
+    }
+
+    if (dateFrom) {
+      conditions.push('e.service_date >= @dateFrom');
+      params.dateFrom = dateFrom;
+    }
+
+    if (dateTo) {
+      conditions.push('e.service_date <= @dateTo');
+      params.dateTo = dateTo;
     }
 
     if (memberId) {
