@@ -100,6 +100,10 @@ function can(action) {
       'entries.create',
       'entries.update',
       'entries.delete',
+      'expenses.list',
+      'expenses.create',
+      'expenses.update',
+      'expenses.delete',
       'reports.generate',
       'reports.export',
       'workbook.import',
@@ -122,6 +126,10 @@ function can(action) {
       'entries.create',
       'entries.update',
       'entries.delete',
+      'expenses.list',
+      'expenses.create',
+      'expenses.update',
+      'expenses.delete',
       'reports.generate',
       'reports.export',
       'workbook.import',
@@ -140,6 +148,10 @@ function can(action) {
       'members.create',
       'entries.list',
       'entries.create',
+      'expenses.list',
+      'expenses.create',
+      'expenses.update',
+      'expenses.delete',
       'reports.generate',
       'reports.export',
       'deacons.list',
@@ -149,6 +161,10 @@ function can(action) {
       'members.create',
       'entries.list',
       'entries.create',
+      'expenses.list',
+      'expenses.create',
+      'expenses.update',
+      'expenses.delete',
       'reports.generate',
       'reports.export',
       'deacons.list',
@@ -686,6 +702,50 @@ app.whenReady().then(() => {
         requirePermission('entries.delete');
       }
       return { ok: true, data: dataService.deleteEntry(entryId) };
+    })
+  );
+
+  ipcMain.handle(
+    'expenses:list',
+    withErrorHandling((_event, filters) => {
+      requirePermission('expenses.list');
+      return { ok: true, data: dataService.listExpenses(filters) };
+    })
+  );
+
+  ipcMain.handle(
+    'expenses:create',
+    withErrorHandling((_event, payload) => {
+      requirePermission('expenses.create');
+      const expense = dataService.createExpense(payload);
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('app:dataChanged', { message: 'Expense saved.' });
+      }
+      return { ok: true, data: expense };
+    })
+  );
+
+  ipcMain.handle(
+    'expenses:update',
+    withErrorHandling((_event, payload) => {
+      requirePermission('expenses.update');
+      const expense = dataService.updateExpense(payload);
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('app:dataChanged', { message: 'Expense updated.' });
+      }
+      return { ok: true, data: expense };
+    })
+  );
+
+  ipcMain.handle(
+    'expenses:delete',
+    withErrorHandling((_event, id) => {
+      requirePermission('expenses.delete');
+      const result = dataService.deleteExpense(id);
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('app:dataChanged', { message: 'Expense deleted.' });
+      }
+      return { ok: true, data: result };
     })
   );
 

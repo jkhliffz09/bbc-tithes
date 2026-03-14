@@ -31,6 +31,11 @@ contextBridge.exposeInMainWorld('faithflow', {
   fillEntryEmptyFields: (payload) => invoke('entries:fillEmpty', payload),
   deleteEntry: (payload) => invoke('entries:delete', payload),
 
+  listExpenses: (filters) => invoke('expenses:list', filters),
+  createExpense: (payload) => invoke('expenses:create', payload),
+  updateExpense: (payload) => invoke('expenses:update', payload),
+  deleteExpense: (id) => invoke('expenses:delete', id),
+
   generateReport: (filters) => invoke('reports:generate', filters),
   previewReport: (filters) => invoke('reports:preview', filters),
   listGeneratedReports: (filters) => invoke('reports:listGenerated', filters),

@@ -49,6 +49,16 @@ export type Entry = {
   updatedAt: string;
 };
 
+export type Expense = {
+  id: number;
+  expenseDate: string;
+  expenseName: string;
+  amount: number;
+  notes: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type ReportRow = {
   memberId: number | null;
   memberCode: string | null;
@@ -66,6 +76,9 @@ export type ReportSummary = {
   thanksgiving: number;
   auditedAmount: number;
   actualMoneyOnHand: number;
+  variance: number;
+  expensesTotal: number;
+  cashOnNet: number;
   total: number;
 };
 
@@ -80,6 +93,7 @@ export type ReportPayload = {
     deacon2Name: string;
   };
   rows: ReportRow[];
+  expenses: Expense[];
   summary: ReportSummary;
 };
 
@@ -155,6 +169,11 @@ declare global {
       updateEntry: (payload: Partial<Entry> & { id: number; allowSingleAssignee?: boolean; adminUsername?: string; adminPassword?: string; adminNote?: string }) => Promise<Entry>;
       fillEntryEmptyFields: (payload: Partial<Entry> & { id: number; allowSingleAssignee?: boolean }) => Promise<Entry>;
       deleteEntry: (payload: { id: number; adminUsername?: string; adminPassword?: string; adminNote?: string } | number) => Promise<{ success: true }>;
+
+      listExpenses: (filters: { date?: string; dateFrom?: string; dateTo?: string }) => Promise<Expense[]>;
+      createExpense: (payload: Partial<Expense>) => Promise<Expense>;
+      updateExpense: (payload: Partial<Expense> & { id: number }) => Promise<Expense>;
+      deleteExpense: (id: number) => Promise<{ success: true }>;
 
       generateReport: (filters: { dateFrom: string; dateTo: string; reportType?: ReportType; adminName?: string; accountingName?: string; deacon1Name?: string; deacon2Name?: string; actualMoneyOnHand?: number; useDeaconLooseOffering?: boolean; forceNew?: boolean }) => Promise<GenerateReportResult>;
       previewReport: (filters: { dateFrom: string; dateTo: string; reportType?: ReportType; adminName?: string; accountingName?: string; useDeaconLooseOffering?: boolean }) => Promise<ReportPayload>;

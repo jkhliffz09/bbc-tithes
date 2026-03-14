@@ -130,10 +130,21 @@ class DataService {
         created_at TEXT NOT NULL
       );
 
+      CREATE TABLE IF NOT EXISTS expenses (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        expense_date TEXT NOT NULL,
+        expense_name TEXT NOT NULL,
+        amount REAL NOT NULL DEFAULT 0,
+        notes TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
       CREATE INDEX IF NOT EXISTS idx_entries_service_date ON entries(service_date);
       CREATE INDEX IF NOT EXISTS idx_entries_member_id ON entries(member_id);
       CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
       CREATE INDEX IF NOT EXISTS idx_generated_reports_dates ON generated_reports(date_from, date_to);
+      CREATE INDEX IF NOT EXISTS idx_expenses_date ON expenses(expense_date);
     `);
 
     if (!this.hasColumn('members', 'birthday')) {
@@ -1022,6 +1033,126 @@ class DataService {
     return { success: true };
   }
 
+  listExpenses(filters = {}) {
+    const date = toDateString(filters.date);
+    const dateFrom = toDateString(filters.dateFrom);
+    const dateTo = toDateString(filters.dateTo);
+    const conditions = [];
+    const params = {};
+
+    if (date) {
+      conditions.push('expense_date = @date');
+      params.date = date;
+    }
+    if (dateFrom) {
+      conditions.push('expense_date >= @dateFrom');
+      params.dateFrom = dateFrom;
+    }
+    if (dateTo) {
+      conditions.push('expense_date <= @dateTo');
+      params.dateTo = dateTo;
+    }
+
+    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+    return this.db
+      .prepare(
+        `SELECT
+           id,
+           expense_date AS expenseDate,
+           expense_name AS expenseName,
+           amount,
+           notes,
+           created_at AS createdAt,
+           updated_at AS updatedAt
+         FROM expenses
+         ${where}
+         ORDER BY expense_date DESC, expense_name ASC, id DESC`
+      )
+      .all(params);
+  }
+
+  getExpenseById(id) {
+    return this.db
+      .prepare(
+        `SELECT
+           id,
+           expense_date AS expenseDate,
+           expense_name AS expenseName,
+           amount,
+           notes,
+           created_at AS createdAt,
+           updated_at AS updatedAt
+         FROM expenses
+         WHERE id = ?`
+      )
+      .get(Number(id));
+  }
+
+  createExpense(payload) {
+    const expenseDate = toDateString(payload.expenseDate);
+    const expenseName = String(payload.expenseName || '').trim();
+    if (!expenseDate) throw new Error('Expense date is required.');
+    if (!expenseName) throw new Error('Expense name is required.');
+    const now = this.now();
+    const result = this.db
+      .prepare(
+        `INSERT INTO expenses
+         (expense_date, expense_name, amount, notes, created_at, updated_at)
+         VALUES
+         (@expenseDate, @expenseName, @amount, @notes, @createdAt, @updatedAt)`
+      )
+      .run({
+        expenseDate,
+        expenseName,
+        amount: valueToNumber(payload.amount),
+        notes: String(payload.notes || '').trim() || null,
+        createdAt: now,
+        updatedAt: now,
+      });
+    return this.getExpenseById(result.lastInsertRowid);
+  }
+
+  updateExpense(payload) {
+    const id = Number(payload.id);
+    if (!id) throw new Error('Expense ID is required.');
+    const expenseDate = toDateString(payload.expenseDate);
+    const expenseName = String(payload.expenseName || '').trim();
+    if (!expenseDate) throw new Error('Expense date is required.');
+    if (!expenseName) throw new Error('Expense name is required.');
+    this.db
+      .prepare(
+        `UPDATE expenses
+         SET expense_date = @expenseDate,
+             expense_name = @expenseName,
+             amount = @amount,
+             notes = @notes,
+             updated_at = @updatedAt
+         WHERE id = @id`
+      )
+      .run({
+        id,
+        expenseDate,
+        expenseName,
+        amount: valueToNumber(payload.amount),
+        notes: String(payload.notes || '').trim() || null,
+        updatedAt: this.now(),
+      });
+    return this.getExpenseById(id);
+  }
+
+  deleteExpense(id) {
+    const expenseId = Number(id);
+    if (!expenseId) throw new Error('Expense ID is required.');
+    this.db.prepare('DELETE FROM expenses WHERE id = ?').run(expenseId);
+    return { success: true };
+  }
+
+  getExpenseSummary(dateFrom, dateTo) {
+    const rows = this.listExpenses({ dateFrom, dateTo });
+    const total = rows.reduce((sum, row) => sum + valueToNumber(row.amount), 0);
+    return { rows, total };
+  }
+
   inferDeaconSignatories(dateFrom, dateTo) {
     const rows = this.db
       .prepare(
@@ -1101,6 +1232,9 @@ class DataService {
     const dateFrom = toDateString(filters.dateFrom) || '1900-01-01';
     const dateTo = toDateString(filters.dateTo) || '2999-12-31';
     const reportType = normalizeReportType(filters.reportType);
+    const expenseSummary = reportType === 'tithes-offerings'
+      ? this.getExpenseSummary(dateFrom, dateTo)
+      : { rows: [], total: 0 };
 
     const rows = this.db
       .prepare(
@@ -1144,6 +1278,9 @@ class DataService {
     let auditedAmount = 0;
     let looseOfferings = 0;
     let actualMoneyOnHand = 0;
+    let variance = 0;
+    let expensesTotal = 0;
+    let cashOnNet = 0;
     if (reportType === 'thanksgiving') {
       auditedAmount = reportTotal;
       actualMoneyOnHand = reportTotal;
@@ -1158,6 +1295,9 @@ class DataService {
           ? auditedAmount - valueToNumber(filters.actualMoneyOnHand)
           : valueToNumber(looseFromDeacons);
       actualMoneyOnHand = auditedAmount - looseOfferings;
+      variance = actualMoneyOnHand - auditedAmount;
+      expensesTotal = valueToNumber(expenseSummary.total);
+      cashOnNet = actualMoneyOnHand - expensesTotal;
     }
 
     const signatory = {
@@ -1178,6 +1318,7 @@ class DataService {
       dateFrom,
       dateTo,
       rows,
+      expenses: expenseSummary.rows,
       signatory,
       summary: {
         tithes: valueToNumber(summary?.tithes),
@@ -1186,6 +1327,9 @@ class DataService {
         thanksgiving: valueToNumber(summary?.thanksgiving),
         auditedAmount,
         actualMoneyOnHand,
+        variance,
+        expensesTotal,
+        cashOnNet,
         total: reportTotal,
       },
     };
@@ -1262,6 +1406,19 @@ class DataService {
         ? {
             ...report,
             reportType: normalizeReportType(report.reportType),
+            expenses: Array.isArray(report.expenses) ? report.expenses : [],
+            summary: {
+              tithes: valueToNumber(report?.summary?.tithes),
+              faithPromise: valueToNumber(report?.summary?.faithPromise),
+              looseOfferings: valueToNumber(report?.summary?.looseOfferings),
+              thanksgiving: valueToNumber(report?.summary?.thanksgiving),
+              auditedAmount: valueToNumber(report?.summary?.auditedAmount),
+              actualMoneyOnHand: valueToNumber(report?.summary?.actualMoneyOnHand),
+              variance: valueToNumber(report?.summary?.variance),
+              expensesTotal: valueToNumber(report?.summary?.expensesTotal),
+              cashOnNet: valueToNumber(report?.summary?.cashOnNet),
+              total: valueToNumber(report?.summary?.total),
+            },
           }
         : report,
     };
@@ -1368,11 +1525,26 @@ class DataService {
             Tithes: report.summary.tithes,
             FaithPromise: report.summary.faithPromise,
             AuditedAmount: report.summary.auditedAmount,
-            ActualMoneyOnHand: report.summary.actualMoneyOnHand,
+            CashOnHand: report.summary.actualMoneyOnHand,
+            Variance: report.summary.variance,
             LooseOfferings: report.summary.looseOfferings,
+            TotalExpenses: report.summary.expensesTotal,
+            CON: report.summary.cashOnNet,
             Total: report.summary.total,
           },
     ]);
+    const expensesSheet = XLSX.utils.json_to_sheet(
+      report.reportType === 'thanksgiving'
+        ? [{ ExpenseDate: '', ExpenseName: '', Amount: '', Notes: '' }]
+        : report.expenses.length
+          ? report.expenses.map((expense) => ({
+              ExpenseDate: expense.expenseDate,
+              ExpenseName: expense.expenseName,
+              Amount: expense.amount,
+              Notes: expense.notes || '',
+            }))
+          : [{ ExpenseDate: '', ExpenseName: '', Amount: '', Notes: '' }]
+    );
 
     const signatoryRows = [];
     if (report.signatory.adminName) signatoryRows.push({ Role: 'Admin', Name: report.signatory.adminName });
@@ -1387,6 +1559,9 @@ class DataService {
       detailSheet,
       report.reportType === 'thanksgiving' ? 'Thanksgiving' : 'TithesOfferings'
     );
+    if (report.reportType === 'tithes-offerings') {
+      XLSX.utils.book_append_sheet(wb, expensesSheet, 'Expenses');
+    }
     XLSX.utils.book_append_sheet(wb, signatoriesSheet, 'Signatories');
     XLSX.writeFile(wb, targetPath);
 
@@ -1404,6 +1579,7 @@ class DataService {
 
     const members = this.listMembers('');
     const entries = this.listEntries({});
+    const expenses = this.listExpenses({});
 
     const wb = XLSX.utils.book_new();
     const membersSheet = XLSX.utils.json_to_sheet(
@@ -1437,9 +1613,18 @@ class DataService {
         Notes: e.notes || '',
       }))
     );
+    const expensesSheet = XLSX.utils.json_to_sheet(
+      expenses.map((expense) => ({
+        ExpenseDate: expense.expenseDate,
+        ExpenseName: expense.expenseName,
+        Amount: expense.amount,
+        Notes: expense.notes || '',
+      }))
+    );
 
     XLSX.utils.book_append_sheet(wb, membersSheet, 'Members');
     XLSX.utils.book_append_sheet(wb, entriesSheet, 'Entries');
+    XLSX.utils.book_append_sheet(wb, expensesSheet, 'Expenses');
     XLSX.writeFile(wb, targetPath);
 
     return {
@@ -1447,6 +1632,7 @@ class DataService {
       path: targetPath,
       memberCount: members.length,
       entryCount: entries.length,
+      rowCount: expenses.length,
     };
   }
 
@@ -1464,6 +1650,7 @@ class DataService {
       userCount: backup.data.users.length,
       approvalCount: backup.data.approvals.length,
       generatedReportCount: backup.data.generatedReports.length,
+      rowCount: backup.data.expenses.length,
     };
   }
 
@@ -1546,9 +1733,23 @@ class DataService {
          ORDER BY id ASC`
       )
       .all();
+    const expenses = this.db
+      .prepare(
+        `SELECT
+           id,
+           expense_date AS expenseDate,
+           expense_name AS expenseName,
+           amount,
+           notes,
+           created_at AS createdAt,
+           updated_at AS updatedAt
+         FROM expenses
+         ORDER BY id ASC`
+      )
+      .all();
 
     return {
-      schemaVersion: 3,
+      schemaVersion: 4,
       exportedAt: this.now(),
       source: {
         appName: 'FaithFlow - BBC Tithes and Offerings',
@@ -1559,6 +1760,7 @@ class DataService {
         users,
         approvals,
         generatedReports,
+        expenses,
       },
     };
   }
@@ -1571,10 +1773,12 @@ class DataService {
     const users = Array.isArray(parsed.data.users) ? parsed.data.users : [];
     const approvals = Array.isArray(parsed.data.approvals) ? parsed.data.approvals : [];
     const generatedReports = Array.isArray(parsed.data.generatedReports) ? parsed.data.generatedReports : [];
+    const expenses = Array.isArray(parsed.data.expenses) ? parsed.data.expenses : [];
 
     const tx = this.db.transaction(() => {
       this.db.prepare('DELETE FROM admin_approvals').run();
       this.db.prepare('DELETE FROM generated_reports').run();
+      this.db.prepare('DELETE FROM expenses').run();
       this.db.prepare('DELETE FROM entries').run();
       this.db.prepare('DELETE FROM members').run();
       this.db.prepare('DELETE FROM users').run();
@@ -1608,6 +1812,12 @@ class DataService {
         (id, date_from, date_to, report_json, created_at)
         VALUES
         (@id, @dateFrom, @dateTo, @reportJson, @createdAt)`
+      );
+      const insertExpense = this.db.prepare(
+        `INSERT INTO expenses
+        (id, expense_date, expense_name, amount, notes, created_at, updated_at)
+        VALUES
+        (@id, @expenseDate, @expenseName, @amount, @notes, @createdAt, @updatedAt)`
       );
 
       for (const m of parsed.data.members) {
@@ -1705,6 +1915,20 @@ class DataService {
           createdAt: String(g.createdAt || this.now()),
         });
       }
+      for (const expense of expenses) {
+        const expenseDate = toDateString(expense.expenseDate);
+        const expenseName = String(expense.expenseName || '').trim();
+        if (!expenseDate || !expenseName) continue;
+        insertExpense.run({
+          id: Number(expense.id),
+          expenseDate,
+          expenseName,
+          amount: valueToNumber(expense.amount),
+          notes: String(expense.notes || '').trim() || null,
+          createdAt: String(expense.createdAt || this.now()),
+          updatedAt: String(expense.updatedAt || this.now()),
+        });
+      }
     });
 
     tx();
@@ -1714,6 +1938,7 @@ class DataService {
       memberCount: this.listMembers('').length,
       entryCount: this.listEntries({}).length,
       userCount: this.listUsers().length,
+      rowCount: this.listExpenses({}).length,
     };
   }
 
@@ -1723,6 +1948,7 @@ class DataService {
     const wb = XLSX.readFile(sourcePath);
     const membersSheet = wb.Sheets.Members;
     const entriesSheet = wb.Sheets.Entries;
+    const expensesSheet = wb.Sheets.Expenses;
 
     if (!membersSheet || !entriesSheet) {
       throw new Error('Workbook must contain Members and Entries sheets.');
@@ -1730,9 +1956,11 @@ class DataService {
 
     const members = XLSX.utils.sheet_to_json(membersSheet, { defval: '' });
     const entries = XLSX.utils.sheet_to_json(entriesSheet, { defval: '' });
+    const expenses = expensesSheet ? XLSX.utils.sheet_to_json(expensesSheet, { defval: '' }) : [];
 
     const tx = this.db.transaction(() => {
       this.db.prepare('DELETE FROM entries').run();
+      this.db.prepare('DELETE FROM expenses').run();
       this.db.prepare('DELETE FROM members').run();
 
       const insertMember = this.db.prepare(
@@ -1790,6 +2018,12 @@ class DataService {
         VALUES
         (@memberId, @guestName, @serviceDate, @serviceType, @assignedDeacon1UserId, @assignedDeacon2UserId, @tithes, @faithPromise, @looseOfferings, @thanksgiving, @notes, @createdAt, @updatedAt)`
       );
+      const insertExpense = this.db.prepare(
+        `INSERT INTO expenses
+        (expense_date, expense_name, amount, notes, created_at, updated_at)
+        VALUES
+        (@expenseDate, @expenseName, @amount, @notes, @createdAt, @updatedAt)`
+      );
 
       const deacons = this.listDeacons();
       const deaconByName = new Map();
@@ -1831,6 +2065,19 @@ class DataService {
           updatedAt: now,
         });
       }
+      for (const row of expenses) {
+        const expenseDate = toDateString(row.ExpenseDate || row.Date);
+        const expenseName = String(row.ExpenseName || row.Name || '').trim();
+        if (!expenseDate || !expenseName) continue;
+        insertExpense.run({
+          expenseDate,
+          expenseName,
+          amount: valueToNumber(row.Amount),
+          notes: String(row.Notes || '').trim() || null,
+          createdAt: now,
+          updatedAt: now,
+        });
+      }
     });
 
     tx();
@@ -1839,6 +2086,7 @@ class DataService {
       success: true,
       memberCount: this.listMembers('').length,
       entryCount: this.listEntries({}).length,
+      rowCount: this.listExpenses({}).length,
     };
   }
 
@@ -1921,11 +2169,12 @@ class DataService {
     const tx = this.db.transaction(() => {
       this.db.prepare('DELETE FROM admin_approvals').run();
       this.db.prepare('DELETE FROM generated_reports').run();
+      this.db.prepare('DELETE FROM expenses').run();
       this.db.prepare('DELETE FROM entries').run();
       this.db.prepare('DELETE FROM members').run();
       this.db.prepare('DELETE FROM users').run();
       this.db
-        .prepare("DELETE FROM sqlite_sequence WHERE name IN ('admin_approvals', 'generated_reports', 'entries', 'members', 'users')")
+        .prepare("DELETE FROM sqlite_sequence WHERE name IN ('admin_approvals', 'generated_reports', 'expenses', 'entries', 'members', 'users')")
         .run();
     });
 

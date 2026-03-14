@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { FormEvent } from 'react';
 import './App.css';
-import type { Entry, GeneratedReportItem, ReportPayload, Member, Role, ReportType, ServiceType, SyncServerVersion, User } from './types';
+import type { Entry, Expense, GeneratedReportItem, ReportPayload, Member, Role, ReportType, ServiceType, SyncServerVersion, User } from './types';
 
-type Tab = 'members' | 'entries' | 'reports' | 'users';
+type Tab = 'members' | 'entries' | 'expenses' | 'reports' | 'users';
 
 type MemberForm = {
   id?: number;
@@ -39,6 +39,14 @@ type UserForm = {
   role: Role;
   password: string;
   isActive: boolean;
+};
+
+type ExpenseForm = {
+  id?: number;
+  expenseDate: string;
+  expenseName: string;
+  amount: string;
+  notes: string;
 };
 
 type PendingEntryAction =
@@ -128,6 +136,13 @@ const emptyUserForm: UserForm = {
   role: 'Users',
   password: '',
   isActive: true,
+};
+
+const emptyExpenseForm: ExpenseForm = {
+  expenseDate: initialDate,
+  expenseName: '',
+  amount: '0',
+  notes: '',
 };
 
 function amount(v: string): number {
@@ -248,6 +263,10 @@ function can(roleInput: Role | string | null, action: string): boolean {
       'entries.create',
       'entries.update',
       'entries.delete',
+      'expenses.list',
+      'expenses.create',
+      'expenses.update',
+      'expenses.delete',
       'reports.generate',
       'reports.export',
       'workbook.import',
@@ -267,6 +286,10 @@ function can(roleInput: Role | string | null, action: string): boolean {
       'entries.create',
       'entries.update',
       'entries.delete',
+      'expenses.list',
+      'expenses.create',
+      'expenses.update',
+      'expenses.delete',
       'reports.generate',
       'reports.export',
       'workbook.import',
@@ -282,6 +305,10 @@ function can(roleInput: Role | string | null, action: string): boolean {
       'members.create',
       'entries.list',
       'entries.create',
+      'expenses.list',
+      'expenses.create',
+      'expenses.update',
+      'expenses.delete',
       'reports.generate',
       'reports.export',
       'deacons.list',
@@ -291,6 +318,10 @@ function can(roleInput: Role | string | null, action: string): boolean {
       'members.create',
       'entries.list',
       'entries.create',
+      'expenses.list',
+      'expenses.create',
+      'expenses.update',
+      'expenses.delete',
       'reports.generate',
       'reports.export',
       'deacons.list',
@@ -347,6 +378,9 @@ function App() {
   const [selectedDate, setSelectedDate] = useState(initialDate);
   const [entries, setEntries] = useState<Entry[]>([]);
   const [entryForm, setEntryForm] = useState<EntryForm>(emptyEntryForm);
+  const [selectedExpenseDate, setSelectedExpenseDate] = useState(initialDate);
+  const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [expenseForm, setExpenseForm] = useState<ExpenseForm>(emptyExpenseForm);
 
   const [reportRange, setReportRange] = useState({
     dateFrom: initialDate,
@@ -557,6 +591,10 @@ function App() {
     },
     { tithes: 0, faithPromise: 0, thanksgiving: 0 }
   );
+  const expenseTotal = useMemo(
+    () => expenses.reduce((sum, expense) => sum + (expense.amount || 0), 0),
+    [expenses]
+  );
 
   const memberCalendarGroups = memberEntries.reduce<Record<string, Entry[]>>((acc, entry) => {
     const key = entry.serviceDate.slice(0, 7);
@@ -587,6 +625,12 @@ function App() {
     if (!can(authUser?.role || null, 'entries.list')) return;
     const data = await run('', () => window.faithflow.listEntries({ date }));
     if (data) setEntries(data);
+  }
+
+  async function loadExpenses(date = selectedExpenseDate) {
+    if (!can(authUser?.role || null, 'expenses.list')) return;
+    const data = await run('', () => window.faithflow.listExpenses({ date }));
+    if (data) setExpenses(data);
   }
 
   async function loadMemberEntries(member: Member, range = memberEntryRange) {
@@ -732,6 +776,7 @@ function App() {
       setAuthUser(null);
       setMembers([]);
       setEntries([]);
+      setExpenses([]);
       setReport(null);
       setReportPreview(null);
       setGeneratedReports([]);
@@ -740,6 +785,8 @@ function App() {
       setViewingMember(null);
       setMemberEntries([]);
       setMemberEntrySearch('');
+      setSelectedExpenseDate(initialDate);
+      setExpenseForm(emptyExpenseForm);
       setToast('');
       setError('');
     });
@@ -766,6 +813,8 @@ function App() {
       setDuplicateDialog(null);
       setMemberForm(emptyMemberForm);
       setEntryForm(emptyEntryForm);
+      setExpenseForm(emptyExpenseForm);
+      setSelectedExpenseDate(initialDate);
       setSelectedMemberIds([]);
       setMemberSearch('');
       setMemberEntrySearch('');
@@ -779,6 +828,7 @@ function App() {
       if (!authUser) return;
       void loadMembers('');
       void loadEntries(selectedDate);
+      void loadExpenses(selectedExpenseDate);
       void loadUsers();
       void loadDeacons();
       void loadGeneratedReports();
@@ -789,13 +839,14 @@ function App() {
       unsubscribe();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authUser?.id, selectedDate]);
+  }, [authUser?.id, selectedDate, selectedExpenseDate]);
 
   useEffect(() => {
     if (!authUser) return;
     const role = normalizeRole(authUser.role);
     void loadMembers('');
     void loadEntries(initialDate);
+    void loadExpenses(initialDate);
     void seedNextMemberCode();
     void loadUsers();
     void loadDeacons();
@@ -811,6 +862,12 @@ function App() {
     void loadReportPreview();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reportRange.dateFrom, reportRange.dateTo, reportType, authUser?.id]);
+
+  useEffect(() => {
+    if (!authUser) return;
+    void loadExpenses(selectedExpenseDate);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedExpenseDate, authUser?.id]);
 
   useEffect(() => {
     if (!viewingMember) return;
@@ -1171,6 +1228,60 @@ function App() {
     await loadEntries();
   }
 
+  async function submitExpense(event: FormEvent) {
+    event.preventDefault();
+    if (!expenseForm.expenseName.trim()) {
+      setError('Expense name is required.');
+      return;
+    }
+    if (!expenseForm.expenseDate) {
+      setError('Expense date is required.');
+      return;
+    }
+    const payload = {
+      expenseDate: expenseForm.expenseDate,
+      expenseName: expenseForm.expenseName.trim(),
+      amount: amount(expenseForm.amount),
+      notes: expenseForm.notes,
+    };
+    if (expenseForm.id) {
+      const updated = await run('Expense updated.', () => window.faithflow.updateExpense({ id: expenseForm.id as number, ...payload }));
+      if (!updated) return;
+    } else {
+      const created = await run('Expense saved.', () => window.faithflow.createExpense(payload));
+      if (!created) return;
+    }
+    setExpenseForm({
+      ...emptyExpenseForm,
+      expenseDate: expenseForm.expenseDate,
+    });
+    await loadExpenses(expenseForm.expenseDate);
+  }
+
+  function editExpense(expense: Expense) {
+    setSelectedExpenseDate(expense.expenseDate);
+    setExpenseForm({
+      id: expense.id,
+      expenseDate: expense.expenseDate,
+      expenseName: expense.expenseName,
+      amount: String(expense.amount || 0),
+      notes: expense.notes || '',
+    });
+    setTab('expenses');
+  }
+
+  async function removeExpense(id: number) {
+    const ok = window.confirm('Delete this expense?');
+    if (!ok) return;
+    const deleted = await run('Expense deleted.', () => window.faithflow.deleteExpense(id));
+    if (!deleted) return;
+    setExpenseForm({
+      ...emptyExpenseForm,
+      expenseDate: selectedExpenseDate,
+    });
+    await loadExpenses(selectedExpenseDate);
+  }
+
   async function submitAdminApproval(event: FormEvent) {
     event.preventDefault();
     if (!pendingEntryAction) return;
@@ -1386,6 +1497,9 @@ function App() {
       <nav className="tabs">
         <button className={tab === 'members' ? 'active' : ''} onClick={() => setTab('members')}>Members</button>
         <button className={tab === 'entries' ? 'active' : ''} onClick={() => setTab('entries')}>Giving Entries</button>
+        {can(role, 'expenses.list') && (
+          <button className={tab === 'expenses' ? 'active' : ''} onClick={() => setTab('expenses')}>Expenses</button>
+        )}
         <button className={tab === 'reports' ? 'active' : ''} onClick={() => setTab('reports')}>Reports</button>
         {can(role, 'users.manage') && (
           <button className={tab === 'users' ? 'active' : ''} onClick={() => setTab('users')}>Users</button>
@@ -1984,6 +2098,129 @@ function App() {
           </section>
         )}
 
+        {tab === 'expenses' && can(role, 'expenses.list') && (
+          <section className="panel grid-2 split-panels">
+            <article>
+              <h2>{expenseForm.id ? 'Edit Expense' : 'Add Expense'}</h2>
+              <form className="form" onSubmit={submitExpense}>
+                <label>
+                  Date
+                  <input
+                    type="date"
+                    value={expenseForm.expenseDate}
+                    onChange={(e) => setExpenseForm((prev) => ({ ...prev, expenseDate: e.target.value }))}
+                    required
+                  />
+                </label>
+                <label>
+                  Expense Name
+                  <input
+                    value={expenseForm.expenseName}
+                    onChange={(e) => setExpenseForm((prev) => ({ ...prev, expenseName: e.target.value }))}
+                    placeholder="Pastor Allowance"
+                    required
+                    disabled={!can(role, expenseForm.id ? 'expenses.update' : 'expenses.create')}
+                  />
+                </label>
+                <label>
+                  Amount
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={expenseForm.amount}
+                    onChange={(e) => setExpenseForm((prev) => ({ ...prev, amount: e.target.value }))}
+                    required
+                    disabled={!can(role, expenseForm.id ? 'expenses.update' : 'expenses.create')}
+                  />
+                </label>
+                <label>
+                  Notes
+                  <textarea
+                    value={expenseForm.notes}
+                    onChange={(e) => setExpenseForm((prev) => ({ ...prev, notes: e.target.value }))}
+                    rows={2}
+                    disabled={!can(role, expenseForm.id ? 'expenses.update' : 'expenses.create')}
+                  />
+                </label>
+                <div className="row-actions">
+                  <button disabled={busy || !can(role, expenseForm.id ? 'expenses.update' : 'expenses.create')} type="submit">
+                    {expenseForm.id ? 'Update Expense' : 'Save Expense'}
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary"
+                    onClick={() =>
+                      setExpenseForm({
+                        ...emptyExpenseForm,
+                        expenseDate: selectedExpenseDate,
+                      })
+                    }
+                  >
+                    Clear
+                  </button>
+                </div>
+              </form>
+            </article>
+
+            <article>
+              <div className="split-header">
+                <h2>Expenses</h2>
+                <label>
+                  Date
+                  <input
+                    type="date"
+                    value={selectedExpenseDate}
+                    onChange={(e) => {
+                      setSelectedExpenseDate(e.target.value);
+                      setExpenseForm((prev) => ({ ...prev, expenseDate: e.target.value }));
+                    }}
+                  />
+                </label>
+              </div>
+
+              <div className="totals">
+                <div>Total Expenses: {money(expenseTotal)}</div>
+              </div>
+
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Expense</th>
+                      <th>Amount</th>
+                      <th>Notes</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {expenses.map((expense) => (
+                      <tr key={expense.id}>
+                        <td>{expense.expenseDate}</td>
+                        <td>{expense.expenseName}</td>
+                        <td>{money(expense.amount)}</td>
+                        <td>{expense.notes || '-'}</td>
+                        <td>
+                          <div className="inline-actions">
+                            {can(role, 'expenses.update') && <button type="button" className="tiny" onClick={() => editExpense(expense)}>Edit</button>}
+                            {can(role, 'expenses.delete') && <button type="button" className="tiny danger" onClick={() => void removeExpense(expense.id)}>Delete</button>}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                    {expenses.length === 0 && (
+                      <tr>
+                        <td colSpan={5} className="muted">No expenses for this date.</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </article>
+          </section>
+        )}
+
         {tab === 'reports' && (
           <section className="report-layout grid gap-4 lg:grid-cols-[360px_1fr]">
             <article className="report-sidebar rounded-xl border border-slate-200 bg-white p-4">
@@ -2065,7 +2302,7 @@ function App() {
                       />
                     </label>
                     <label>
-                      Actual Money On Hand
+                      Cash on Hand
                       <input
                         type="number"
                         min="0"
@@ -2074,19 +2311,61 @@ function App() {
                         onChange={(e) => setReportAudit((p) => ({ ...p, actualMoneyOnHand: e.target.value }))}
                       />
                     </label>
+                    <label>
+                      Total Expenses
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={String(reportPreview?.summary.expensesTotal ?? report?.summary.expensesTotal ?? 0)}
+                        readOnly
+                      />
+                    </label>
+                    <label>
+                      C.O.N
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={String(reportPreview?.summary.cashOnNet ?? report?.summary.cashOnNet ?? 0)}
+                        readOnly
+                      />
+                    </label>
                   </>
                 )}
                 {!isDeaconRole && !isThanksgivingReport && (
-                  <label>
-                    Loose Offerings (from Deacon Generated Reports)
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      value={String(reportPreview?.summary.looseOfferings ?? report?.summary.looseOfferings ?? 0)}
-                      readOnly
-                    />
-                  </label>
+                  <>
+                    <label>
+                      Loose Offerings (from Deacon Generated Reports)
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={String(reportPreview?.summary.looseOfferings ?? report?.summary.looseOfferings ?? 0)}
+                        readOnly
+                      />
+                    </label>
+                    <label>
+                      Total Expenses
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={String(reportPreview?.summary.expensesTotal ?? report?.summary.expensesTotal ?? 0)}
+                        readOnly
+                      />
+                    </label>
+                    <label>
+                      C.O.N
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={String(reportPreview?.summary.cashOnNet ?? report?.summary.cashOnNet ?? 0)}
+                        readOnly
+                      />
+                    </label>
+                  </>
                 )}
                 <div className="row-actions">
                   <button onClick={generateReport} disabled={busy || !can(role, 'reports.generate')}>Generate</button>
@@ -2172,9 +2451,56 @@ function App() {
                   {report.reportType === 'tithes-offerings' && (
                     <div className="totals">
                       <div>Total Audited Amount: {money(report.summary.auditedAmount)}</div>
-                      <div>Actual Money On Hand: {money(report.summary.actualMoneyOnHand)}</div>
+                      <div>Cash on Hand: {money(report.summary.actualMoneyOnHand)}</div>
+                      <div>Loss / Excess: {money(report.summary.variance)}</div>
                       <div className="grand">Loose Offerings: {money(report.summary.looseOfferings)}</div>
+                      <div>Total Expenses: {money(report.summary.expensesTotal)}</div>
+                      <div className="grand">C.O.N: {money(report.summary.cashOnNet)}</div>
                     </div>
+                  )}
+                  {report.reportType === 'tithes-offerings' && (
+                    <section className="thanksgiving-page">
+                      <header className="print-header">
+                        <h3>Bible Baptist Church</h3>
+                        <p>Expenses</p>
+                        <p>{report.dateFrom === report.dateTo ? report.dateFrom : `${report.dateFrom} to ${report.dateTo}`}</p>
+                      </header>
+                      <div className="table-wrap">
+                        <table>
+                          <thead>
+                            <tr>
+                              <th>Date</th>
+                              <th>Expense</th>
+                              <th>Amount</th>
+                              <th>Notes</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {report.expenses.map((expense) => (
+                              <tr key={expense.id}>
+                                <td>{expense.expenseDate}</td>
+                                <td>{expense.expenseName}</td>
+                                <td>{money(expense.amount)}</td>
+                                <td>{expense.notes || '-'}</td>
+                              </tr>
+                            ))}
+                            {report.expenses.length === 0 && (
+                              <tr>
+                                <td colSpan={4}>No expenses for this report range.</td>
+                              </tr>
+                            )}
+                          </tbody>
+                          <tfoot>
+                            <tr>
+                              <th></th>
+                              <th>Total Expenses</th>
+                              <th>{money(report.summary.expensesTotal)}</th>
+                              <th></th>
+                            </tr>
+                          </tfoot>
+                        </table>
+                      </div>
+                    </section>
                   )}
 
                   <div className="signatories">
