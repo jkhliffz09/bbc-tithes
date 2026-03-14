@@ -228,7 +228,7 @@ function formatServerVersionLabel(version: SyncServerVersion): string {
   const device = String(version.deviceName || version.platform || 'Unknown device').trim();
   const by = String(version.uploadedBy || '').trim();
   const appVersion = String(version.appVersion || '').trim();
-  return `${uploadedAt} - ${device}${by ? ` ${by}` : ''}${appVersion ? ` - v${appVersion}` : ''}`;
+  return `${uploadedAt} - ${device}${by ? ` ${by}` : ''}${appVersion ? ` - v${appVersion}` : ''}${version.isLegacyLatest ? ' - latest only' : ''}`;
 }
 
 function requiresAdminEntryApproval(role: Role | null): boolean {

@@ -116,6 +116,7 @@ export type SyncServerVersion = {
   platform: string;
   deviceName: string;
   uploadedBy: string;
+  isLegacyLatest?: boolean;
 };
 
 declare global {

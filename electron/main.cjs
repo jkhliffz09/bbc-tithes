@@ -1026,6 +1026,36 @@ app.whenReady().then(() => {
           },
         }
       );
+      if (response.status === 404) {
+        const legacyResponse = await fetch(
+          `${serverUrl}/faithflow/sync/download?churchKey=${encodeURIComponent(churchKey)}`,
+          {
+            method: 'GET',
+            headers: {
+              ...(apiToken ? { authorization: `Bearer ${apiToken}` } : {}),
+            },
+          }
+        );
+        if (!legacyResponse.ok) {
+          const text = await legacyResponse.text();
+          throw new Error(`Version list failed (${legacyResponse.status}): ${text || 'Unknown error'}`);
+        }
+        const body = await legacyResponse.json();
+        return {
+          ok: true,
+          data: [
+            {
+              versionId: '',
+              uploadedAt: String(body?.uploadedAt || ''),
+              appVersion: String(body?.appVersion || ''),
+              platform: String(body?.platform || ''),
+              deviceName: String(body?.deviceName || body?.platform || ''),
+              uploadedBy: String(body?.uploadedBy || ''),
+              isLegacyLatest: true,
+            },
+          ],
+        };
+      }
       if (!response.ok) {
         const text = await response.text();
         throw new Error(`Version list failed (${response.status}): ${text || 'Unknown error'}`);
