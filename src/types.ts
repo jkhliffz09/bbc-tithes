@@ -161,6 +161,7 @@ declare global {
       onDataChanged: (callback: (payload?: { message?: string }) => void) => () => void;
       onSyncUploadRequested: (callback: () => void) => () => void;
       onSyncDownloadRequested: (callback: () => void) => () => void;
+      onAppReset: (callback: () => void) => () => void;
     };
   }
 }

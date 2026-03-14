@@ -1768,6 +1768,23 @@ class DataService {
     };
   }
 
+  resetAllData() {
+    const tx = this.db.transaction(() => {
+      this.db.prepare('DELETE FROM admin_approvals').run();
+      this.db.prepare('DELETE FROM generated_reports').run();
+      this.db.prepare('DELETE FROM entries').run();
+      this.db.prepare('DELETE FROM members').run();
+      this.db.prepare('DELETE FROM users').run();
+      this.db
+        .prepare("DELETE FROM sqlite_sequence WHERE name IN ('admin_approvals', 'generated_reports', 'entries', 'members', 'users')")
+        .run();
+    });
+
+    tx();
+    this.seedDefaultUsers();
+    return { success: true };
+  }
+
   close() {
     this.db.close();
   }

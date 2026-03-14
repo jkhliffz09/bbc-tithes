@@ -67,4 +67,9 @@ contextBridge.exposeInMainWorld('faithflow', {
     ipcRenderer.on('sync:downloadRequested', handler);
     return () => ipcRenderer.removeListener('sync:downloadRequested', handler);
   },
+  onAppReset: (callback) => {
+    const handler = () => callback();
+    ipcRenderer.on('app:reset', handler);
+    return () => ipcRenderer.removeListener('app:reset', handler);
+  },
 });

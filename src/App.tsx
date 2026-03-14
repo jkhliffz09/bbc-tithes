@@ -635,8 +635,12 @@ function App() {
       setMembers([]);
       setEntries([]);
       setReport(null);
+      setReportPreview(null);
+      setGeneratedReports([]);
       setUsers([]);
       setDeacons([]);
+      setViewingMember(null);
+      setMemberEntries([]);
       setMemberEntrySearch('');
       setToast('');
       setError('');
@@ -645,6 +649,32 @@ function App() {
   }, []);
 
   useEffect(() => {
+    const unsubscribeReset = window.faithflow.onAppReset(() => {
+      localStorage.removeItem(SYNC_STORAGE_KEYS.serverUrl);
+      localStorage.removeItem(SYNC_STORAGE_KEYS.apiToken);
+      localStorage.removeItem(SYNC_STORAGE_KEYS.churchKey);
+      localStorage.removeItem(SYNC_STORAGE_KEYS.passphrase);
+      setSyncForm({ serverUrl: '', apiToken: '', churchKey: '', passphrase: '' });
+      setSyncMode(null);
+      setSyncProgress(null);
+      setViewingMember(null);
+      setMemberEntries([]);
+      setReport(null);
+      setReportPreview(null);
+      setGeneratedReports([]);
+      setGeneratedConflict(null);
+      setPendingEntryAction(null);
+      setDuplicateDialog(null);
+      setMemberForm(emptyMemberForm);
+      setEntryForm(emptyEntryForm);
+      setSelectedMemberIds([]);
+      setMemberSearch('');
+      setMemberEntrySearch('');
+      setReportRange({ dateFrom: initialDate, dateTo: initialDate });
+      setReportAudit({ actualMoneyOnHand: '' });
+      setTab('members');
+    });
+
     const unsubscribe = window.faithflow.onDataChanged((payload) => {
       if (!authUser) return;
       void loadMembers('');
@@ -654,7 +684,10 @@ function App() {
       void loadGeneratedReports();
       setToast(payload?.message || 'Data imported and reloaded.');
     });
-    return () => unsubscribe();
+    return () => {
+      unsubscribeReset();
+      unsubscribe();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authUser?.id, selectedDate]);
 

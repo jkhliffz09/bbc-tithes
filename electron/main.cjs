@@ -355,6 +355,38 @@ async function importFullBackupFlow() {
   return result;
 }
 
+async function resetAppFlow() {
+  requireAuth();
+  if (!['Superadmin', 'Admin'].includes(getRole() || '')) {
+    throw new Error('Only Admin or Superadmin can reset all data.');
+  }
+
+  const result = await dialog.showMessageBox({
+    type: 'warning',
+    buttons: ['Reset All Data', 'Cancel'],
+    defaultId: 1,
+    cancelId: 1,
+    title: 'Reset All Data',
+    message: 'This will permanently delete all local members, entries, reports, users, and saved server sync settings.',
+    detail: 'Use this only if you want a complete fresh start on this device.',
+  });
+
+  if (result.response !== 0) return { canceled: true };
+
+  dataService.resetAllData();
+  sessionUser = null;
+  notifyRenderer('app:reset');
+  notifyRenderer('app:loggedOut');
+
+  await dialog.showMessageBox({
+    type: 'info',
+    title: 'Reset Complete',
+    message: 'All local FaithFlow data has been reset.',
+  });
+
+  return { success: true };
+}
+
 async function checkForUpdatesManual() {
   if (isDev) {
     await dialog.showMessageBox({
@@ -443,6 +475,8 @@ function buildAppMenu() {
         { type: 'separator' },
         { label: 'Upload to Server', click: () => notifyRenderer('sync:uploadRequested') },
         { label: 'Download from Server', click: () => notifyRenderer('sync:downloadRequested') },
+        { type: 'separator' },
+        { label: 'Reset', click: menuAction(resetAppFlow) },
         { type: 'separator' },
         { label: 'Logout', click: menuAction(() => performLogout()) },
         { type: 'separator' },
