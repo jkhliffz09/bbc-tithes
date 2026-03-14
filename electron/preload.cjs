@@ -46,6 +46,7 @@ contextBridge.exposeInMainWorld('faithflow', {
   exportFullBackup: () => invoke('backup:exportFull'),
   importFullBackup: () => invoke('backup:importFull'),
   syncUploadToServer: (payload) => invoke('sync:upload', payload),
+  syncListServerVersions: (payload) => invoke('sync:listVersions', payload),
   syncDownloadFromServer: (payload) => invoke('sync:download', payload),
   onLoggedOut: (callback) => {
     const handler = () => callback();

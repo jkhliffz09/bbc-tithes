@@ -1,6 +1,7 @@
 const path = require('node:path');
 const crypto = require('node:crypto');
 const zlib = require('node:zlib');
+const os = require('node:os');
 const { app, BrowserWindow, dialog, ipcMain, Menu } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const { DataService } = require('./data-service.cjs');
@@ -993,6 +994,8 @@ app.whenReady().then(() => {
           uploadedAt: new Date().toISOString(),
           appVersion: app.getVersion(),
           platform: process.platform,
+          deviceName: os.hostname(),
+          uploadedBy: String(sessionUser?.fullName || sessionUser?.username || '').trim(),
           payload: encryptedPayload,
         }),
       });
@@ -1005,18 +1008,17 @@ app.whenReady().then(() => {
   );
 
   ipcMain.handle(
-    'sync:download',
+    'sync:listVersions',
     withErrorHandling(async (_event, payload) => {
       requirePermission('backup.import');
       const serverUrl = String(payload?.serverUrl || '').trim().replace(/\/+$/, '');
       const apiToken = String(payload?.apiToken || '').trim();
       const churchKey = String(payload?.churchKey || '').trim();
-      const passphrase = String(payload?.passphrase || '');
-      if (!serverUrl || !churchKey || !passphrase) {
-        throw new Error('Server URL, Church Key, and Passphrase are required.');
+      if (!serverUrl || !churchKey) {
+        throw new Error('Server URL and Church Key are required.');
       }
       const response = await fetch(
-        `${serverUrl}/faithflow/sync/download?churchKey=${encodeURIComponent(churchKey)}`,
+        `${serverUrl}/faithflow/sync/versions?churchKey=${encodeURIComponent(churchKey)}`,
         {
           method: 'GET',
           headers: {
@@ -1024,6 +1026,35 @@ app.whenReady().then(() => {
           },
         }
       );
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(`Version list failed (${response.status}): ${text || 'Unknown error'}`);
+      }
+      const body = await response.json();
+      return { ok: true, data: body?.versions || [] };
+    })
+  );
+
+  ipcMain.handle(
+    'sync:download',
+    withErrorHandling(async (_event, payload) => {
+      requirePermission('backup.import');
+      const serverUrl = String(payload?.serverUrl || '').trim().replace(/\/+$/, '');
+      const apiToken = String(payload?.apiToken || '').trim();
+      const churchKey = String(payload?.churchKey || '').trim();
+      const passphrase = String(payload?.passphrase || '');
+      const versionId = String(payload?.versionId || '').trim();
+      if (!serverUrl || !churchKey || !passphrase) {
+        throw new Error('Server URL, Church Key, and Passphrase are required.');
+      }
+      const query = new URLSearchParams({ churchKey });
+      if (versionId) query.set('versionId', versionId);
+      const response = await fetch(`${serverUrl}/faithflow/sync/download?${query.toString()}`, {
+        method: 'GET',
+        headers: {
+          ...(apiToken ? { authorization: `Bearer ${apiToken}` } : {}),
+        },
+      });
       if (!response.ok) {
         const text = await response.text();
         throw new Error(`Download failed (${response.status}): ${text || 'Unknown error'}`);

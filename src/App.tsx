@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { FormEvent } from 'react';
 import './App.css';
-import type { Entry, GeneratedReportItem, ReportPayload, Member, Role, ReportType, ServiceType, User } from './types';
+import type { Entry, GeneratedReportItem, ReportPayload, Member, Role, ReportType, ServiceType, SyncServerVersion, User } from './types';
 
 type Tab = 'members' | 'entries' | 'reports' | 'users';
 
@@ -210,6 +210,27 @@ function formatMemberDateLabel(dateStr: string): string {
   }).format(d);
 }
 
+function formatServerVersionLabel(version: SyncServerVersion): string {
+  let uploadedAt = 'Unknown date';
+  if (version.uploadedAt) {
+    const d = new Date(version.uploadedAt);
+    if (!Number.isNaN(d.getTime())) {
+      const year = d.getFullYear();
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      const hours = d.getHours();
+      const minutes = String(d.getMinutes()).padStart(2, '0');
+      const meridiem = hours >= 12 ? 'PM' : 'AM';
+      const hour12 = String(hours % 12 || 12);
+      uploadedAt = `${year}-${month}-${day} ${hour12}:${minutes} ${meridiem}`;
+    }
+  }
+  const device = String(version.deviceName || version.platform || 'Unknown device').trim();
+  const by = String(version.uploadedBy || '').trim();
+  const appVersion = String(version.appVersion || '').trim();
+  return `${uploadedAt} - ${device}${by ? ` ${by}` : ''}${appVersion ? ` - v${appVersion}` : ''}`;
+}
+
 function requiresAdminEntryApproval(role: Role | null): boolean {
   return role === 'Deacon' || role === 'Pastor' || role === 'Accounting';
 }
@@ -353,7 +374,8 @@ function App() {
   const [adminApproval, setAdminApproval] = useState({ adminUsername: '', adminPassword: '', adminNote: '' });
   const [duplicateDialog, setDuplicateDialog] = useState<DuplicateEntryDialog | null>(null);
   const [syncMode, setSyncMode] = useState<SyncDialogMode>(null);
-  const [syncProgress, setSyncProgress] = useState<'upload' | 'download' | null>(null);
+  const [syncProgress, setSyncProgress] = useState<'upload' | 'download' | 'versions' | null>(null);
+  const [serverVersions, setServerVersions] = useState<SyncServerVersion[]>([]);
   const [syncForm, setSyncForm] = useState<SyncConfig>({
     serverUrl: localStorage.getItem(SYNC_STORAGE_KEYS.serverUrl) || '',
     apiToken: localStorage.getItem(SYNC_STORAGE_KEYS.apiToken) || '',
@@ -389,6 +411,10 @@ function App() {
       openSyncDialog(mode);
       return;
     }
+    if (mode === 'download') {
+      await loadServerVersions(payload);
+      return;
+    }
     setSyncProgress(mode);
     try {
       const result =
@@ -397,6 +423,60 @@ function App() {
           : await run('Backup downloaded from server.', () => window.faithflow.syncDownloadFromServer(payload));
       if (!result) return;
       setSyncMode(null);
+    } finally {
+      setSyncProgress(null);
+    }
+  }
+
+  async function loadServerVersions(payload?: SyncConfig) {
+    const config = payload || {
+      serverUrl: (localStorage.getItem(SYNC_STORAGE_KEYS.serverUrl) || '').trim(),
+      apiToken: (localStorage.getItem(SYNC_STORAGE_KEYS.apiToken) || '').trim(),
+      churchKey: (localStorage.getItem(SYNC_STORAGE_KEYS.churchKey) || '').trim(),
+      passphrase: localStorage.getItem(SYNC_STORAGE_KEYS.passphrase) || '',
+    };
+    if (!config.serverUrl || !config.churchKey || !config.passphrase) {
+      openSyncDialog('download');
+      return;
+    }
+    setSyncProgress('versions');
+    try {
+      const versions = await run('', () =>
+        window.faithflow.syncListServerVersions({
+          serverUrl: config.serverUrl,
+          apiToken: config.apiToken,
+          churchKey: config.churchKey,
+        })
+      );
+      if (!versions) return;
+      setServerVersions(versions);
+      setSyncMode(null);
+      if (!versions.length) {
+        setError('No server backup versions found for this Church Key.');
+      }
+    } finally {
+      setSyncProgress(null);
+    }
+  }
+
+  async function downloadServerVersion(versionId: string) {
+    const payload: SyncConfig = {
+      serverUrl: (localStorage.getItem(SYNC_STORAGE_KEYS.serverUrl) || '').trim(),
+      apiToken: (localStorage.getItem(SYNC_STORAGE_KEYS.apiToken) || '').trim(),
+      churchKey: (localStorage.getItem(SYNC_STORAGE_KEYS.churchKey) || '').trim(),
+      passphrase: localStorage.getItem(SYNC_STORAGE_KEYS.passphrase) || '',
+    };
+    if (!payload.serverUrl || !payload.churchKey || !payload.passphrase) {
+      openSyncDialog('download');
+      return;
+    }
+    setSyncProgress('download');
+    try {
+      const result = await run('Backup downloaded from server.', () =>
+        window.faithflow.syncDownloadFromServer({ ...payload, versionId })
+      );
+      if (!result) return;
+      setServerVersions([]);
     } finally {
       setSyncProgress(null);
     }
@@ -675,6 +755,7 @@ function App() {
       setSyncForm({ serverUrl: '', apiToken: '', churchKey: '', passphrase: '' });
       setSyncMode(null);
       setSyncProgress(null);
+      setServerVersions([]);
       setViewingMember(null);
       setMemberEntries([]);
       setReport(null);
@@ -1224,6 +1305,10 @@ function App() {
     }
     saveSyncConfig(payload);
     setSyncMode(null);
+    if (mode === 'download') {
+      await loadServerVersions(payload);
+      return;
+    }
     await triggerSync(mode);
   }
 
@@ -2272,14 +2357,62 @@ function App() {
       {syncProgress && (
         <div className="modal-backdrop" role="presentation">
           <section className="modal-card">
-            <h3>{syncProgress === 'upload' ? 'Uploading...' : 'Downloading...'}</h3>
+            <h3>
+              {syncProgress === 'upload'
+                ? 'Uploading...'
+                : syncProgress === 'download'
+                  ? 'Downloading...'
+                  : 'Loading Versions...'}
+            </h3>
             <p className="muted">
               {syncProgress === 'upload'
                 ? 'Uploading encrypted backup to server. Please wait.'
-                : 'Downloading and restoring encrypted backup. Please wait.'}
+                : syncProgress === 'download'
+                  ? 'Downloading and restoring encrypted backup. Please wait.'
+                  : 'Loading saved backup versions from server. Please wait.'}
             </p>
             <div className="sync-loading">
               <span className="sync-spinner" aria-hidden="true" />
+            </div>
+          </section>
+        </div>
+      )}
+      {!!serverVersions.length && (
+        <div className="modal-backdrop" role="presentation">
+          <section className="modal-card">
+            <h3>Download from Server</h3>
+            <p className="muted">Select which uploaded backup version to restore for this Church Key.</p>
+            <div className="table-wrap" style={{ maxHeight: '22rem' }}>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Version</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {serverVersions.map((version) => (
+                    <tr key={version.versionId}>
+                      <td>{formatServerVersionLabel(version)}</td>
+                      <td>
+                        <button
+                          type="button"
+                          className="tiny"
+                          onClick={() => void downloadServerVersion(version.versionId)}
+                          disabled={busy}
+                        >
+                          Download
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="row-actions">
+              <button type="button" className="secondary" onClick={() => setServerVersions([])}>
+                Close
+              </button>
             </div>
           </section>
         </div>

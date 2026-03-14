@@ -28,6 +28,10 @@ const DATA_DIR = process.env.SYNC_DATA_DIR || path.join(__dirname, 'data');
 const DATA_FILE = path.join(DATA_DIR, 'sync-store.json');
 const MAX_BODY_BYTES = Number(process.env.SYNC_MAX_BODY_BYTES || 20 * 1024 * 1024);
 
+function createVersionId() {
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
 function ensureStore() {
   if (!fs.existsSync(DATA_DIR)) {
     fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -49,6 +53,43 @@ function readStore() {
   } catch {
     return { records: {} };
   }
+}
+
+function normalizeRecord(record) {
+  if (!record || typeof record !== 'object') {
+    return { versions: [] };
+  }
+  if (Array.isArray(record.versions)) {
+    return {
+      versions: record.versions
+        .filter((item) => item && typeof item === 'object' && String(item.payload || '').trim())
+        .map((item) => ({
+          versionId: String(item.versionId || createVersionId()),
+          payload: String(item.payload || ''),
+          uploadedAt: String(item.uploadedAt || new Date().toISOString()),
+          appVersion: String(item.appVersion || ''),
+          platform: String(item.platform || ''),
+          deviceName: String(item.deviceName || ''),
+          uploadedBy: String(item.uploadedBy || ''),
+        })),
+    };
+  }
+  if (String(record.payload || '').trim()) {
+    return {
+      versions: [
+        {
+          versionId: String(record.versionId || `legacy-${new Date(String(record.uploadedAt || Date.now())).getTime() || Date.now()}`),
+          payload: String(record.payload || ''),
+          uploadedAt: String(record.uploadedAt || new Date().toISOString()),
+          appVersion: String(record.appVersion || ''),
+          platform: String(record.platform || ''),
+          deviceName: String(record.deviceName || ''),
+          uploadedBy: String(record.uploadedBy || ''),
+        },
+      ],
+    };
+  }
+  return { versions: [] };
 }
 
 function writeStore(store) {
@@ -133,14 +174,47 @@ const server = http.createServer(async (req, res) => {
       }
 
       const store = readStore();
-      store.records[churchKey] = {
+      const record = normalizeRecord(store.records[churchKey]);
+      const version = {
+        versionId: createVersionId(),
         payload,
         uploadedAt: String(body?.uploadedAt || new Date().toISOString()),
         appVersion: String(body?.appVersion || ''),
         platform: String(body?.platform || ''),
+        deviceName: String(body?.deviceName || ''),
+        uploadedBy: String(body?.uploadedBy || ''),
       };
+      record.versions.unshift(version);
+      store.records[churchKey] = record;
       writeStore(store);
-      sendJson(res, 200, { success: true, churchKey, uploadedAt: store.records[churchKey].uploadedAt });
+      sendJson(res, 200, { success: true, churchKey, uploadedAt: version.uploadedAt, versionId: version.versionId });
+      return;
+    }
+
+    if (url.pathname === '/faithflow/sync/versions' && req.method === 'GET') {
+      if (!verifyAuth(req)) {
+        unauthorized(res);
+        return;
+      }
+      const churchKey = String(url.searchParams.get('churchKey') || '').trim();
+      if (!validateChurchKey(churchKey)) {
+        sendJson(res, 400, { error: 'Invalid churchKey format.' });
+        return;
+      }
+      const store = readStore();
+      const record = normalizeRecord(store.records[churchKey]);
+      const versions = record.versions
+        .slice()
+        .sort((a, b) => String(b.uploadedAt || '').localeCompare(String(a.uploadedAt || '')))
+        .map((item) => ({
+          versionId: item.versionId,
+          uploadedAt: item.uploadedAt,
+          appVersion: item.appVersion,
+          platform: item.platform,
+          deviceName: item.deviceName,
+          uploadedBy: item.uploadedBy,
+        }));
+      sendJson(res, 200, { churchKey, versions });
       return;
     }
 
@@ -155,16 +229,29 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       const store = readStore();
-      const record = store.records[churchKey];
-      if (!record) {
+      const versionId = String(url.searchParams.get('versionId') || '').trim();
+      const record = normalizeRecord(store.records[churchKey]);
+      if (!record.versions.length) {
         sendJson(res, 404, { error: 'No backup found for this churchKey.' });
         return;
       }
+      const selected = versionId
+        ? record.versions.find((item) => item.versionId === versionId)
+        : record.versions
+            .slice()
+            .sort((a, b) => String(b.uploadedAt || '').localeCompare(String(a.uploadedAt || '')))[0];
+      if (!selected) {
+        sendJson(res, 404, { error: 'Requested backup version was not found.' });
+        return;
+      }
       sendJson(res, 200, {
-        payload: record.payload,
-        uploadedAt: record.uploadedAt,
-        appVersion: record.appVersion,
-        platform: record.platform,
+        versionId: selected.versionId,
+        payload: selected.payload,
+        uploadedAt: selected.uploadedAt,
+        appVersion: selected.appVersion,
+        platform: selected.platform,
+        deviceName: selected.deviceName,
+        uploadedBy: selected.uploadedBy,
       });
       return;
     }

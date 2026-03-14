@@ -109,6 +109,15 @@ export type ImportExportResult = {
   path?: string;
 };
 
+export type SyncServerVersion = {
+  versionId: string;
+  uploadedAt: string;
+  appVersion: string;
+  platform: string;
+  deviceName: string;
+  uploadedBy: string;
+};
+
 declare global {
   interface Window {
     faithflow: {
@@ -160,7 +169,8 @@ declare global {
       exportFullBackup: () => Promise<ImportExportResult>;
       importFullBackup: () => Promise<ImportExportResult>;
       syncUploadToServer: (payload: { serverUrl: string; apiToken?: string; churchKey: string; passphrase: string }) => Promise<{ success: true }>;
-      syncDownloadFromServer: (payload: { serverUrl: string; apiToken?: string; churchKey: string; passphrase: string }) => Promise<ImportExportResult>;
+      syncListServerVersions: (payload: { serverUrl: string; apiToken?: string; churchKey: string }) => Promise<SyncServerVersion[]>;
+      syncDownloadFromServer: (payload: { serverUrl: string; apiToken?: string; churchKey: string; passphrase: string; versionId?: string }) => Promise<ImportExportResult>;
       onLoggedOut: (callback: () => void) => () => void;
       onDataChanged: (callback: (payload?: { message?: string }) => void) => () => void;
       onSyncUploadRequested: (callback: () => void) => () => void;
