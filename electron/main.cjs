@@ -70,6 +70,21 @@ function toISODate(value) {
   return d.toISOString().slice(0, 10);
 }
 
+function normalizeReportType(reportType) {
+  return String(reportType || '').trim().toLowerCase() === 'thanksgiving'
+    ? 'thanksgiving'
+    : 'tithes-offerings';
+}
+
+function buildReportFileStem(filters = {}) {
+  const reportType = normalizeReportType(filters.reportType);
+  const dateFrom = toISODate(filters.dateFrom) || localTodayISO();
+  const dateTo = toISODate(filters.dateTo) || dateFrom;
+  const rangeLabel = dateFrom === dateTo ? dateFrom : `${dateFrom}_to_${dateTo}`;
+  const typeLabel = reportType === 'thanksgiving' ? 'thanksgiving' : 'tithes-and-offerings';
+  return `faithflow-${typeLabel}-${rangeLabel}`;
+}
+
 function can(action) {
   const role = getRole();
   if (!role) return false;
@@ -684,6 +699,7 @@ app.whenReady().then(() => {
         payload = dataService.getReport({
           dateFrom: selectedDate,
           dateTo: selectedDate,
+          reportType: filters?.reportType,
           actualMoneyOnHand: Number(filters?.actualMoneyOnHand || 0),
           deacon1Name: role === 'Pastor' ? String(sessionUser?.fullName || '').trim() : '',
           deacon2Name: role === 'Pastor' ? '' : '',
@@ -693,13 +709,14 @@ app.whenReady().then(() => {
         payload = dataService.getReport({
           dateFrom: filters?.dateFrom,
           dateTo: filters?.dateTo,
+          reportType: filters?.reportType,
           adminName: String(filters?.adminName || '').trim(),
           accountingName: String(filters?.accountingName || '').trim(),
           useDeaconLooseOffering: true,
         });
       }
 
-      const existing = dataService.findGeneratedReportExact(payload.dateFrom, payload.dateTo);
+      const existing = dataService.findGeneratedReportExact(payload.dateFrom, payload.dateTo, payload.reportType);
       if (existing && !filters?.forceNew) {
         return {
           ok: true,
@@ -735,6 +752,7 @@ app.whenReady().then(() => {
           data: dataService.getReport({
             dateFrom: selectedDate,
             dateTo: selectedDate,
+            reportType: filters?.reportType,
             actualMoneyOnHand: 0,
             deacon1Name: role === 'Pastor' ? String(sessionUser?.fullName || '').trim() : '',
             deacon2Name: role === 'Pastor' ? '' : '',
@@ -747,6 +765,7 @@ app.whenReady().then(() => {
         data: dataService.getReport({
           dateFrom: filters?.dateFrom,
           dateTo: filters?.dateTo,
+          reportType: filters?.reportType,
           adminName: String(filters?.adminName || '').trim(),
           accountingName: String(filters?.accountingName || '').trim(),
           useDeaconLooseOffering: true,
@@ -762,7 +781,14 @@ app.whenReady().then(() => {
       const role = getRole();
       if (role === 'Deacon' || role === 'Pastor') {
         const selectedDate = toISODate(filters?.dateFrom || filters?.dateTo) || localTodayISO();
-        return { ok: true, data: dataService.listGeneratedReports({ dateFrom: selectedDate, dateTo: selectedDate }) };
+        return {
+          ok: true,
+          data: dataService.listGeneratedReports({
+            dateFrom: selectedDate,
+            dateTo: selectedDate,
+            reportType: filters?.reportType,
+          }),
+        };
       }
       return { ok: true, data: dataService.listGeneratedReports(filters) };
     })
@@ -791,7 +817,7 @@ app.whenReady().then(() => {
       const role = getRole();
       const saved = await dialog.showSaveDialog({
         title: 'Export Report Excel',
-        defaultPath: 'faithflow-report.xlsx',
+        defaultPath: `${buildReportFileStem(filters)}.xlsx`,
         filters: [{ name: 'Excel Workbook', extensions: ['xlsx'] }],
       });
 
@@ -806,6 +832,7 @@ app.whenReady().then(() => {
           data: dataService.exportReportWorkbook(saved.filePath, {
             dateFrom: selectedDate,
             dateTo: selectedDate,
+            reportType: filters?.reportType,
             actualMoneyOnHand: Number(filters?.actualMoneyOnHand || 0),
             deacon1Name: role === 'Pastor' ? String(sessionUser?.fullName || '').trim() : '',
             deacon2Name: role === 'Pastor' ? '' : '',
@@ -819,6 +846,7 @@ app.whenReady().then(() => {
         data: dataService.exportReportWorkbook(saved.filePath, {
           dateFrom: filters?.dateFrom,
           dateTo: filters?.dateTo,
+          reportType: filters?.reportType,
           adminName: String(filters?.adminName || '').trim(),
           accountingName: String(filters?.accountingName || '').trim(),
           useDeaconLooseOffering: true,
@@ -831,9 +859,14 @@ app.whenReady().then(() => {
     'reports:exportGeneratedExcel',
     withErrorHandling(async (_event, id) => {
       requirePermission('reports.export');
+      const generated = dataService.getGeneratedReportById(id);
       const saved = await dialog.showSaveDialog({
         title: 'Export Generated Report Excel',
-        defaultPath: 'faithflow-generated-report.xlsx',
+        defaultPath: `${buildReportFileStem({
+          reportType: generated.report?.reportType,
+          dateFrom: generated.report?.dateFrom || generated.dateFrom,
+          dateTo: generated.report?.dateTo || generated.dateTo,
+        })}.xlsx`,
         filters: [{ name: 'Excel Workbook', extensions: ['xlsx'] }],
       });
       if (saved.canceled || !saved.filePath) {
@@ -845,11 +878,11 @@ app.whenReady().then(() => {
 
   ipcMain.handle(
     'reports:exportPdf',
-    withErrorHandling(async () => {
+    withErrorHandling(async (_event, filters) => {
       requirePermission('reports.export');
       const saved = await dialog.showSaveDialog({
         title: 'Export Report PDF',
-        defaultPath: 'faithflow-report.pdf',
+        defaultPath: `${buildReportFileStem(filters)}.pdf`,
         filters: [{ name: 'PDF', extensions: ['pdf'] }],
       });
       if (saved.canceled || !saved.filePath) {

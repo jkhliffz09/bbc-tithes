@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { FormEvent } from 'react';
 import './App.css';
-import type { Entry, GeneratedReportItem, ReportPayload, Member, Role, ServiceType, User } from './types';
+import type { Entry, GeneratedReportItem, ReportPayload, Member, Role, ReportType, ServiceType, User } from './types';
 
 type Tab = 'members' | 'entries' | 'reports' | 'users';
 
@@ -19,6 +19,8 @@ type MemberForm = {
 
 type EntryForm = {
   id?: number;
+  isGuest: boolean;
+  guestName: string;
   memberId: number;
   serviceDate: string;
   serviceType: ServiceType;
@@ -40,13 +42,15 @@ type UserForm = {
 };
 
 type PendingEntryAction =
-  | { type: 'update'; payload: { id: number; memberId: number; serviceDate: string; serviceType: ServiceType; assignedDeacon1UserId: number; assignedDeacon2UserId: number | null; allowSingleAssignee?: boolean; tithes: number; faithPromise: number; thanksgiving: number; notes: string } }
+  | { type: 'update'; payload: { id: number; isGuest: boolean; guestName: string; memberId: number | null; serviceDate: string; serviceType: ServiceType; assignedDeacon1UserId: number; assignedDeacon2UserId: number | null; allowSingleAssignee?: boolean; tithes: number; faithPromise: number; thanksgiving: number; notes: string } }
   | { type: 'delete'; entryId: number };
 
 type DuplicateEntryDialog = {
   existing: Entry;
   payload: {
-    memberId: number;
+    isGuest: boolean;
+    guestName: string;
+    memberId: number | null;
     serviceDate: string;
     serviceType: ServiceType;
     assignedDeacon1UserId: number;
@@ -105,6 +109,8 @@ const emptyMemberForm: MemberForm = {
 };
 
 const emptyEntryForm: EntryForm = {
+  isGuest: false,
+  guestName: '',
   memberId: 0,
   serviceDate: initialDate,
   serviceType: deriveServiceTypeFromDate(initialDate),
@@ -288,6 +294,11 @@ function can(roleInput: Role | string | null, action: string): boolean {
   return matrix[role].has(action);
 }
 
+const REPORT_TYPE_OPTIONS: Array<{ value: ReportType; label: string }> = [
+  { value: 'tithes-offerings', label: 'Tithes and Offerings' },
+  { value: 'thanksgiving', label: 'Thanksgiving' },
+];
+
 function App() {
   const [tab, setTab] = useState<Tab>('members');
   const [busy, setBusy] = useState(false);
@@ -320,18 +331,20 @@ function App() {
     dateFrom: initialDate,
     dateTo: initialDate,
   });
+  const [reportType, setReportType] = useState<ReportType>('tithes-offerings');
   const [reportAudit, setReportAudit] = useState({ actualMoneyOnHand: '' });
   const [report, setReport] = useState<ReportPayload | null>(null);
   const [reportPreview, setReportPreview] = useState<ReportPayload | null>(null);
   const [generatedReports, setGeneratedReports] = useState<GeneratedReportItem[]>([]);
   const [generatedConflict, setGeneratedConflict] = useState<{
-    generatedId: number;
-    filters: {
-      dateFrom: string;
-      dateTo: string;
-      adminName?: string;
-      accountingName?: string;
-      deacon1Name?: string;
+      generatedId: number;
+      filters: {
+        dateFrom: string;
+        dateTo: string;
+        reportType?: ReportType;
+        adminName?: string;
+        accountingName?: string;
+        deacon1Name?: string;
       deacon2Name?: string;
       actualMoneyOnHand?: number;
     };
@@ -514,7 +527,7 @@ function App() {
   async function generateReport() {
     if (!can(authUser?.role || null, 'reports.generate')) return;
     const role = normalizeRole(authUser?.role);
-    if ((role === 'Deacon' || role === 'Pastor') && !String(reportAudit.actualMoneyOnHand).trim()) {
+    if ((role === 'Deacon' || role === 'Pastor') && reportType === 'tithes-offerings' && !String(reportAudit.actualMoneyOnHand).trim()) {
       setError('Actual Money On Hand is required.');
       return;
     }
@@ -523,13 +536,15 @@ function App() {
         ? {
             dateFrom: reportRange.dateFrom,
             dateTo: reportRange.dateFrom,
-            actualMoneyOnHand: amount(reportAudit.actualMoneyOnHand),
+            reportType,
+            actualMoneyOnHand: reportType === 'tithes-offerings' ? amount(reportAudit.actualMoneyOnHand) : 0,
           }
         : {
             ...reportRange,
+            reportType,
             adminName: authUser?.fullName || '',
             accountingName: '',
-            useDeaconLooseOffering: true,
+            useDeaconLooseOffering: reportType === 'tithes-offerings',
           };
     const result = await run('', () => window.faithflow.generateReport(filters));
     if (!result) return;
@@ -547,13 +562,14 @@ function App() {
     const role = normalizeRole(authUser?.role);
     const filters =
       role === 'Deacon' || role === 'Pastor'
-        ? { dateFrom: reportRange.dateFrom, dateTo: reportRange.dateFrom }
+        ? { dateFrom: reportRange.dateFrom, dateTo: reportRange.dateFrom, reportType }
         : {
             dateFrom: reportRange.dateFrom,
             dateTo: reportRange.dateTo,
+            reportType,
             adminName: authUser?.fullName || '',
             accountingName: '',
-            useDeaconLooseOffering: true,
+            useDeaconLooseOffering: reportType === 'tithes-offerings',
           };
     const data = await run('', () => window.faithflow.previewReport(filters));
     if (data) setReportPreview(data);
@@ -564,8 +580,8 @@ function App() {
     const role = normalizeRole(authUser?.role);
     const filters =
       role === 'Deacon' || role === 'Pastor'
-        ? { dateFrom: reportRange.dateFrom, dateTo: reportRange.dateFrom }
-        : { dateFrom: reportRange.dateFrom, dateTo: reportRange.dateTo };
+        ? { dateFrom: reportRange.dateFrom, dateTo: reportRange.dateFrom, reportType }
+        : { dateFrom: reportRange.dateFrom, dateTo: reportRange.dateTo, reportType };
     const data = await run('', () => window.faithflow.listGeneratedReports(filters));
     if (data) setGeneratedReports(data);
   }
@@ -573,6 +589,7 @@ function App() {
   async function openGeneratedReport(id: number) {
     const data = await run('', () => window.faithflow.getGeneratedReport(id));
     if (!data) return;
+    setReportType(data.report.reportType || 'tithes-offerings');
     setReport(data.report);
     setToast('Loaded generated report.');
   }
@@ -586,6 +603,7 @@ function App() {
   async function printGeneratedReport(id: number) {
     const data = await run('', () => window.faithflow.getGeneratedReport(id));
     if (!data) return;
+    setReportType(data.report.reportType || 'tithes-offerings');
     setReport(data.report);
     setTimeout(() => window.print(), 120);
   }
@@ -671,6 +689,7 @@ function App() {
       setMemberSearch('');
       setMemberEntrySearch('');
       setReportRange({ dateFrom: initialDate, dateTo: initialDate });
+      setReportType('tithes-offerings');
       setReportAudit({ actualMoneyOnHand: '' });
       setTab('members');
     });
@@ -710,7 +729,7 @@ function App() {
     void loadGeneratedReports();
     void loadReportPreview();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [reportRange.dateFrom, reportRange.dateTo, authUser?.id]);
+  }, [reportRange.dateFrom, reportRange.dateTo, reportType, authUser?.id]);
 
   useEffect(() => {
     if (!viewingMember) return;
@@ -932,8 +951,12 @@ function App() {
 
   async function submitEntry(event: FormEvent) {
     event.preventDefault();
-    if (!entryForm.memberId) {
+    if (!entryForm.isGuest && !entryForm.memberId) {
       setError('Please select a member from autocomplete results.');
+      return;
+    }
+    if (entryForm.isGuest && !entryForm.guestName.trim()) {
+      setError('Guest name is required.');
       return;
     }
     const currentRole = normalizeRole(authUser?.role);
@@ -954,7 +977,9 @@ function App() {
     }
 
     const payload = {
-      memberId: entryForm.memberId,
+      isGuest: entryForm.isGuest,
+      guestName: entryForm.guestName.trim(),
+      memberId: entryForm.isGuest ? null : entryForm.memberId,
       serviceDate: entryForm.serviceDate,
       serviceType: deriveServiceTypeFromDate(entryForm.serviceDate),
       assignedDeacon1UserId: isPastor ? pastorUserId : entryForm.assignedDeacon1UserId,
@@ -978,7 +1003,9 @@ function App() {
     } else {
       const existingRows = await run('', () => window.faithflow.listEntries({ date: entryForm.serviceDate }));
       if (!existingRows) return;
-      const duplicate = existingRows.find((row) => row.memberId === payload.memberId);
+      const duplicate = payload.isGuest
+        ? null
+        : existingRows.find((row) => row.memberId === payload.memberId);
       if (duplicate) {
         setDuplicateDialog({ existing: duplicate, payload });
         return;
@@ -988,6 +1015,8 @@ function App() {
 
     setEntryForm({
       ...emptyEntryForm,
+      isGuest: false,
+      guestName: '',
       serviceDate: entryForm.serviceDate,
       serviceType: deriveServiceTypeFromDate(entryForm.serviceDate),
       assignedDeacon1UserId: isPastor ? pastorUserId : entryForm.assignedDeacon1UserId,
@@ -1007,6 +1036,8 @@ function App() {
 
     const fillPayload = {
       id: existing.id,
+      isGuest: false,
+      guestName: '',
       serviceType: existing.serviceType,
       assignedDeacon1UserId: isPastor
         ? pastorUserId
@@ -1027,6 +1058,8 @@ function App() {
 
     setEntryForm({
       ...emptyEntryForm,
+      isGuest: false,
+      guestName: '',
       serviceDate: existing.serviceDate,
       serviceType: deriveServiceTypeFromDate(existing.serviceDate),
       assignedDeacon1UserId: fillPayload.assignedDeacon1UserId,
@@ -1077,6 +1110,8 @@ function App() {
       if (!updated) return;
       setEntryForm({
         ...emptyEntryForm,
+        isGuest: false,
+        guestName: '',
         serviceDate: pendingEntryAction.payload.serviceDate,
         serviceType: deriveServiceTypeFromDate(pendingEntryAction.payload.serviceDate),
         assignedDeacon1UserId: pendingEntryAction.payload.assignedDeacon1UserId,
@@ -1095,6 +1130,8 @@ function App() {
       if (!deleted) return;
       setEntryForm({
         ...emptyEntryForm,
+        isGuest: false,
+        guestName: '',
         serviceDate: initialDate,
         assignedDeacon1UserId: entryForm.assignedDeacon1UserId,
         assignedDeacon2UserId: entryForm.assignedDeacon2UserId,
@@ -1108,11 +1145,14 @@ function App() {
   }
 
   function editEntry(entry: Entry) {
-    const label = `${entry.memberCode || '----'} - ${entry.memberName}`;
+    const isGuest = !entry.memberId;
+    const label = isGuest ? '' : `${entry.memberCode || '----'} - ${entry.memberName}`;
     setMemberEntrySearch(label);
     setEntryForm({
       id: entry.id,
-      memberId: entry.memberId,
+      isGuest,
+      guestName: entry.guestName || (isGuest ? entry.memberName : ''),
+      memberId: entry.memberId || 0,
       serviceDate: entry.serviceDate,
       serviceType: entry.serviceType,
       assignedDeacon1UserId: entry.assignedDeacon1UserId || 0,
@@ -1127,7 +1167,7 @@ function App() {
 
   async function exportReportExcel() {
     const role = normalizeRole(authUser?.role);
-    if ((role === 'Deacon' || role === 'Pastor') && !String(reportAudit.actualMoneyOnHand).trim()) {
+    if ((role === 'Deacon' || role === 'Pastor') && reportType === 'tithes-offerings' && !String(reportAudit.actualMoneyOnHand).trim()) {
       setError('Actual Money On Hand is required.');
       return;
     }
@@ -1136,13 +1176,15 @@ function App() {
         ? {
             dateFrom: reportRange.dateFrom,
             dateTo: reportRange.dateFrom,
-            actualMoneyOnHand: amount(reportAudit.actualMoneyOnHand),
+            reportType,
+            actualMoneyOnHand: reportType === 'tithes-offerings' ? amount(reportAudit.actualMoneyOnHand) : 0,
           }
         : {
             ...reportRange,
+            reportType,
             adminName: authUser?.fullName || '',
             accountingName: '',
-            useDeaconLooseOffering: true,
+            useDeaconLooseOffering: reportType === 'tithes-offerings',
           };
     const result = await run('', () => window.faithflow.exportReportExcel(filters));
     if (!result || result.canceled) return;
@@ -1151,11 +1193,17 @@ function App() {
 
   async function exportReportPdf() {
     const role = normalizeRole(authUser?.role);
-    if ((role === 'Deacon' || role === 'Pastor') && !String(reportAudit.actualMoneyOnHand).trim()) {
+    if ((role === 'Deacon' || role === 'Pastor') && reportType === 'tithes-offerings' && !String(reportAudit.actualMoneyOnHand).trim()) {
       setError('Actual Money On Hand is required.');
       return;
     }
-    const result = await run('', () => window.faithflow.exportReportPdf());
+    const result = await run('', () =>
+      window.faithflow.exportReportPdf({
+        dateFrom: report?.dateFrom || reportRange.dateFrom,
+        dateTo: report?.dateTo || (isDeaconRole ? reportRange.dateFrom : reportRange.dateTo),
+        reportType: report?.reportType || reportType,
+      })
+    );
     if (!result || result.canceled) return;
     setToast(`Report PDF exported to ${result.path || 'selected path'}.`);
   }
@@ -1227,6 +1275,7 @@ function App() {
   const role = normalizeRole(authUser.role);
   const isPastorRole = role === 'Pastor';
   const isDeaconRole = role === 'Deacon' || role === 'Pastor';
+  const isThanksgivingReport = reportType === 'thanksgiving';
   const reportDeacon1 = reportPreview?.signatory.deacon1Name || report?.signatory.deacon1Name || '';
   const reportDeacon2 = reportPreview?.signatory.deacon2Name || report?.signatory.deacon2Name || '';
   const canEditEntries = can(role, 'entries.update') || requiresAdminEntryApproval(role);
@@ -1604,6 +1653,37 @@ function App() {
               <h2>{entryForm.id ? 'Edit Giving Entry' : 'Record Giving Entry'}</h2>
               <form className="form" onSubmit={submitEntry}>
                 <label>
+                  Entry Type
+                  <select
+                    value={entryForm.isGuest ? 'guest' : 'member'}
+                    onChange={(e) => {
+                      const isGuest = e.target.value === 'guest';
+                      setEntryForm((p) => ({
+                        ...p,
+                        isGuest,
+                        guestName: isGuest ? p.guestName : '',
+                        memberId: isGuest ? 0 : p.memberId,
+                      }));
+                      setMemberEntrySearch('');
+                    }}
+                  >
+                    <option value="member">Member</option>
+                    <option value="guest">Guest / Non-member</option>
+                  </select>
+                </label>
+                {entryForm.isGuest ? (
+                  <label>
+                    Guest Name *
+                    <input
+                      placeholder="Enter guest or visitor name"
+                      value={entryForm.guestName}
+                      onChange={(e) => setEntryForm((p) => ({ ...p, guestName: e.target.value }))}
+                      required
+                    />
+                  </label>
+                ) : (
+                  <>
+                <label>
                   Search Member *
                   <input
                     placeholder="Type member name or code"
@@ -1640,6 +1720,8 @@ function App() {
                   <div className="selected-member">
                     Selected: {selectedEntryMember.memberCode || '----'} - {selectedEntryMember.fullName}
                   </div>
+                )}
+                  </>
                 )}
 
                 {isPastorRole ? (
@@ -1733,6 +1815,8 @@ function App() {
                     onClick={() => {
                       setEntryForm({
                         ...emptyEntryForm,
+                        isGuest: false,
+                        guestName: '',
                         serviceDate: initialDate,
                         serviceType: deriveServiceTypeFromDate(initialDate),
                         assignedDeacon1UserId: entryForm.assignedDeacon1UserId,
@@ -1820,6 +1904,16 @@ function App() {
             <article className="report-sidebar rounded-xl border border-slate-200 bg-white p-4">
               <h2 className="mb-3 text-lg font-semibold text-slate-800">Printable Report</h2>
               <div className="form">
+                <label>
+                  Report Type
+                  <select value={reportType} onChange={(e) => setReportType(e.target.value as ReportType)}>
+                    {REPORT_TYPE_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
                 {isDeaconRole ? (
                   <label>
                     Date
@@ -1873,7 +1967,7 @@ function App() {
                     <input value={authUser.fullName} readOnly />
                   </label>
                 )}
-                {isDeaconRole && (
+                {isDeaconRole && !isThanksgivingReport && (
                   <>
                     <label>
                       Total Audited Amount
@@ -1897,7 +1991,7 @@ function App() {
                     </label>
                   </>
                 )}
-                {!isDeaconRole && (
+                {!isDeaconRole && !isThanksgivingReport && (
                   <label>
                     Loose Offerings (from Deacon Generated Reports)
                     <input
@@ -1926,6 +2020,9 @@ function App() {
                 <div className="grid gap-2">
                   {generatedReports.map((g) => (
                     <article key={g.id} className="rounded-lg border border-slate-200 bg-white p-2.5">
+                      <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
+                        {g.reportType === 'thanksgiving' ? 'Thanksgiving' : 'Tithes and Offerings'}
+                      </p>
                       <p className="text-sm text-slate-700">
                         {g.dateFrom === g.dateTo ? g.dateFrom : `${g.dateFrom} to ${g.dateTo}`}
                       </p>
@@ -1950,7 +2047,7 @@ function App() {
                 <div className="report-print print-target">
                   <header className="print-header">
                     <h3>Bible Baptist Church</h3>
-                    <p>FaithFlow Giving Report</p>
+                    <p>{report.reportType === 'thanksgiving' ? 'Thanksgiving Report' : 'Tithes and Offerings Report'}</p>
                     <p>{report.dateFrom === report.dateTo ? report.dateFrom : `${report.dateFrom} to ${report.dateTo}`}</p>
                   </header>
 
@@ -1960,8 +2057,8 @@ function App() {
                         <tr>
                           <th>Code</th>
                           <th>Member</th>
-                          <th>Tithes</th>
-                          <th>Faith Promise</th>
+                          {report.reportType === 'thanksgiving' ? <th>Thanksgiving</th> : <th>Tithes</th>}
+                          {report.reportType === 'thanksgiving' ? null : <th>Faith Promise</th>}
                           <th>Total</th>
                         </tr>
                       </thead>
@@ -1970,8 +2067,8 @@ function App() {
                           <tr key={row.memberId}>
                             <td>{row.memberCode || '-'}</td>
                             <td>{row.memberName}</td>
-                            <td>{money(row.tithes)}</td>
-                            <td>{money(row.faithPromise)}</td>
+                            <td>{money(report.reportType === 'thanksgiving' ? row.thanksgiving : row.tithes)}</td>
+                            {report.reportType === 'thanksgiving' ? null : <td>{money(row.faithPromise)}</td>}
                             <td>{money(row.total)}</td>
                           </tr>
                         ))}
@@ -1980,54 +2077,20 @@ function App() {
                         <tr>
                           <th></th>
                           <th>Grand Total</th>
-                          <th>{money(report.summary.tithes)}</th>
-                          <th>{money(report.summary.faithPromise)}</th>
+                          <th>{money(report.reportType === 'thanksgiving' ? report.summary.thanksgiving : report.summary.tithes)}</th>
+                          {report.reportType === 'thanksgiving' ? null : <th>{money(report.summary.faithPromise)}</th>}
                           <th>{money(report.summary.total)}</th>
                         </tr>
                       </tfoot>
                     </table>
                   </div>
-                  <section className="thanksgiving-page">
-                    <header className="print-header">
-                      <h3>Bible Baptist Church</h3>
-                      <p>Thanksgiving Report</p>
-                      <p>{report.dateFrom === report.dateTo ? report.dateFrom : `${report.dateFrom} to ${report.dateTo}`}</p>
-                    </header>
-                    <div className="table-wrap">
-                      <table>
-                        <thead>
-                          <tr>
-                            <th>Code</th>
-                            <th>Member</th>
-                            <th>Thanksgiving</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {report.rows
-                            .filter((row) => row.thanksgiving !== 0)
-                            .map((row) => (
-                              <tr key={`thanks-${row.memberId}`}>
-                                <td>{row.memberCode || '-'}</td>
-                                <td>{row.memberName}</td>
-                                <td>{money(row.thanksgiving)}</td>
-                              </tr>
-                            ))}
-                        </tbody>
-                        <tfoot>
-                          <tr>
-                            <th></th>
-                            <th>Total Thanksgiving</th>
-                            <th>{money(report.summary.thanksgiving)}</th>
-                          </tr>
-                        </tfoot>
-                      </table>
+                  {report.reportType === 'tithes-offerings' && (
+                    <div className="totals">
+                      <div>Total Audited Amount: {money(report.summary.auditedAmount)}</div>
+                      <div>Actual Money On Hand: {money(report.summary.actualMoneyOnHand)}</div>
+                      <div className="grand">Loose Offerings: {money(report.summary.looseOfferings)}</div>
                     </div>
-                  </section>
-                  <div className="totals">
-                    <div>Total Audited Amount: {money(report.summary.auditedAmount)}</div>
-                    <div>Actual Money On Hand: {money(report.summary.actualMoneyOnHand)}</div>
-                    <div className="grand">Loose Offerings: {money(report.summary.looseOfferings)}</div>
-                  </div>
+                  )}
 
                   <div className="signatories">
                     {!isDeaconRole && (

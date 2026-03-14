@@ -1,6 +1,7 @@
 export type Role = 'Superadmin' | 'Admin' | 'Deacon' | 'Pastor' | 'Accounting' | 'Users';
 
 export type ServiceType = 'Sunday' | 'Monday' | 'Tuesday' | 'Wednesday' | 'Thursday' | 'Friday' | 'Saturday';
+export type ReportType = 'tithes-offerings' | 'thanksgiving';
 
 export type User = {
   id: number;
@@ -29,8 +30,9 @@ export type Member = {
 
 export type Entry = {
   id: number;
-  memberId: number;
+  memberId: number | null;
   memberName: string;
+  guestName?: string | null;
   memberCode: string | null;
   serviceDate: string;
   serviceType: ServiceType;
@@ -48,7 +50,7 @@ export type Entry = {
 };
 
 export type ReportRow = {
-  memberId: number;
+  memberId: number | null;
   memberCode: string | null;
   memberName: string;
   tithes: number;
@@ -68,6 +70,7 @@ export type ReportSummary = {
 };
 
 export type ReportPayload = {
+  reportType: ReportType;
   dateFrom: string;
   dateTo: string;
   signatory: {
@@ -82,6 +85,7 @@ export type ReportPayload = {
 
 export type GeneratedReportItem = {
   id: number;
+  reportType: ReportType;
   dateFrom: string;
   dateTo: string;
   createdAt: string;
@@ -142,13 +146,13 @@ declare global {
       fillEntryEmptyFields: (payload: Partial<Entry> & { id: number; allowSingleAssignee?: boolean }) => Promise<Entry>;
       deleteEntry: (payload: { id: number; adminUsername?: string; adminPassword?: string; adminNote?: string } | number) => Promise<{ success: true }>;
 
-      generateReport: (filters: { dateFrom: string; dateTo: string; adminName?: string; accountingName?: string; deacon1Name?: string; deacon2Name?: string; actualMoneyOnHand?: number; useDeaconLooseOffering?: boolean; forceNew?: boolean }) => Promise<GenerateReportResult>;
-      previewReport: (filters: { dateFrom: string; dateTo: string; adminName?: string; accountingName?: string; useDeaconLooseOffering?: boolean }) => Promise<ReportPayload>;
-      listGeneratedReports: (filters: { dateFrom: string; dateTo: string }) => Promise<GeneratedReportItem[]>;
+      generateReport: (filters: { dateFrom: string; dateTo: string; reportType?: ReportType; adminName?: string; accountingName?: string; deacon1Name?: string; deacon2Name?: string; actualMoneyOnHand?: number; useDeaconLooseOffering?: boolean; forceNew?: boolean }) => Promise<GenerateReportResult>;
+      previewReport: (filters: { dateFrom: string; dateTo: string; reportType?: ReportType; adminName?: string; accountingName?: string; useDeaconLooseOffering?: boolean }) => Promise<ReportPayload>;
+      listGeneratedReports: (filters: { dateFrom: string; dateTo: string; reportType?: ReportType }) => Promise<GeneratedReportItem[]>;
       getGeneratedReport: (id: number) => Promise<{ id: number; dateFrom: string; dateTo: string; createdAt: string; report: ReportPayload }>;
       deleteGeneratedReport: (id: number) => Promise<{ success: true }>;
-      exportReportExcel: (filters: { dateFrom: string; dateTo: string; adminName?: string; accountingName?: string; deacon1Name?: string; deacon2Name?: string; actualMoneyOnHand?: number; useDeaconLooseOffering?: boolean }) => Promise<ImportExportResult>;
-      exportReportPdf: () => Promise<ImportExportResult>;
+      exportReportExcel: (filters: { dateFrom: string; dateTo: string; reportType?: ReportType; adminName?: string; accountingName?: string; deacon1Name?: string; deacon2Name?: string; actualMoneyOnHand?: number; useDeaconLooseOffering?: boolean }) => Promise<ImportExportResult>;
+      exportReportPdf: (filters: { dateFrom: string; dateTo: string; reportType?: ReportType }) => Promise<ImportExportResult>;
       exportGeneratedReportExcel: (id: number) => Promise<ImportExportResult>;
       importMembersTemplate: () => Promise<ImportExportResult>;
       importAppWorkbook: () => Promise<ImportExportResult>;

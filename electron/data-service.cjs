@@ -37,6 +37,12 @@ function normalizeRole(role) {
   return normalized;
 }
 
+function normalizeReportType(reportType) {
+  return String(reportType || '').trim().toLowerCase() === 'thanksgiving'
+    ? 'thanksgiving'
+    : 'tithes-offerings';
+}
+
 function hashPassword(password) {
   return crypto.createHash('sha256').update(String(password)).digest('hex');
 }
@@ -77,7 +83,8 @@ class DataService {
 
       CREATE TABLE IF NOT EXISTS entries (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        member_id INTEGER NOT NULL,
+        member_id INTEGER,
+        guest_name TEXT,
         service_date TEXT NOT NULL,
         service_type TEXT NOT NULL,
         assigned_deacon_1_user_id INTEGER,
@@ -137,6 +144,39 @@ class DataService {
     }
     if (!this.hasColumn('entries', 'assigned_deacon_2_user_id')) {
       this.db.exec('ALTER TABLE entries ADD COLUMN assigned_deacon_2_user_id INTEGER');
+    }
+    if (!this.hasColumn('entries', 'guest_name')) {
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS entries_new (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          member_id INTEGER,
+          guest_name TEXT,
+          service_date TEXT NOT NULL,
+          service_type TEXT NOT NULL,
+          assigned_deacon_1_user_id INTEGER,
+          assigned_deacon_2_user_id INTEGER,
+          tithes REAL NOT NULL DEFAULT 0,
+          faith_promise REAL NOT NULL DEFAULT 0,
+          loose_offerings REAL NOT NULL DEFAULT 0,
+          thanksgiving REAL NOT NULL DEFAULT 0,
+          notes TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          FOREIGN KEY(member_id) REFERENCES members(id) ON DELETE CASCADE
+        );
+        INSERT INTO entries_new (
+          id, member_id, guest_name, service_date, service_type, assigned_deacon_1_user_id, assigned_deacon_2_user_id,
+          tithes, faith_promise, loose_offerings, thanksgiving, notes, created_at, updated_at
+        )
+        SELECT
+          id, member_id, NULL, service_date, service_type, assigned_deacon_1_user_id, assigned_deacon_2_user_id,
+          tithes, faith_promise, loose_offerings, thanksgiving, notes, created_at, updated_at
+        FROM entries;
+        DROP TABLE entries;
+        ALTER TABLE entries_new RENAME TO entries;
+        CREATE INDEX IF NOT EXISTS idx_entries_service_date ON entries(service_date);
+        CREATE INDEX IF NOT EXISTS idx_entries_member_id ON entries(member_id);
+      `);
     }
     if (!this.hasColumn('members', 'first_name')) {
       this.db.exec('ALTER TABLE members ADD COLUMN first_name TEXT');
@@ -737,7 +777,8 @@ class DataService {
         `SELECT
            e.id,
            e.member_id AS memberId,
-           m.full_name AS memberName,
+           COALESCE(m.full_name, e.guest_name, 'Guest') AS memberName,
+           e.guest_name AS guestName,
            m.member_code AS memberCode,
            e.service_date AS serviceDate,
            e.service_type AS serviceType,
@@ -753,7 +794,7 @@ class DataService {
            e.created_at AS createdAt,
            e.updated_at AS updatedAt
          FROM entries e
-         INNER JOIN members m ON m.id = e.member_id
+         LEFT JOIN members m ON m.id = e.member_id
          LEFT JOIN users d1 ON d1.id = e.assigned_deacon_1_user_id
          LEFT JOIN users d2 ON d2.id = e.assigned_deacon_2_user_id
          ${where}
@@ -764,8 +805,11 @@ class DataService {
 
   createEntry(payload) {
     const now = this.now();
-    const memberId = Number(payload.memberId);
-    if (!memberId) throw new Error('Member is required.');
+    const isGuest = Boolean(payload.isGuest);
+    const memberId = isGuest ? null : Number(payload.memberId);
+    const guestName = String(payload.guestName || '').trim();
+    if (!isGuest && !memberId) throw new Error('Member is required.');
+    if (isGuest && !guestName) throw new Error('Guest name is required.');
 
     const serviceDate = toDateString(payload.serviceDate);
     if (!serviceDate) throw new Error('Service date is required.');
@@ -789,13 +833,14 @@ class DataService {
 
     const stmt = this.db.prepare(
       `INSERT INTO entries
-      (member_id, service_date, service_type, assigned_deacon_1_user_id, assigned_deacon_2_user_id, tithes, faith_promise, loose_offerings, thanksgiving, notes, created_at, updated_at)
+      (member_id, guest_name, service_date, service_type, assigned_deacon_1_user_id, assigned_deacon_2_user_id, tithes, faith_promise, loose_offerings, thanksgiving, notes, created_at, updated_at)
       VALUES
-      (@memberId, @serviceDate, @serviceType, @assignedDeacon1UserId, @assignedDeacon2UserId, @tithes, @faithPromise, @looseOfferings, @thanksgiving, @notes, @createdAt, @updatedAt)`
+      (@memberId, @guestName, @serviceDate, @serviceType, @assignedDeacon1UserId, @assignedDeacon2UserId, @tithes, @faithPromise, @looseOfferings, @thanksgiving, @notes, @createdAt, @updatedAt)`
     );
 
     const result = stmt.run({
       memberId,
+      guestName: isGuest ? guestName : null,
       serviceDate,
       serviceType: payload.serviceType,
       assignedDeacon1UserId,
@@ -818,7 +863,8 @@ class DataService {
         `SELECT
            e.id,
            e.member_id AS memberId,
-           m.full_name AS memberName,
+           COALESCE(m.full_name, e.guest_name, 'Guest') AS memberName,
+           e.guest_name AS guestName,
            m.member_code AS memberCode,
            e.service_date AS serviceDate,
            e.service_type AS serviceType,
@@ -834,7 +880,7 @@ class DataService {
            e.created_at AS createdAt,
            e.updated_at AS updatedAt
          FROM entries e
-         INNER JOIN members m ON m.id = e.member_id
+         LEFT JOIN members m ON m.id = e.member_id
          LEFT JOIN users d1 ON d1.id = e.assigned_deacon_1_user_id
          LEFT JOIN users d2 ON d2.id = e.assigned_deacon_2_user_id
          WHERE e.id = ?`
@@ -845,8 +891,11 @@ class DataService {
   updateEntry(payload) {
     const id = Number(payload.id);
     if (!id) throw new Error('Entry ID is required.');
-    const memberId = Number(payload.memberId);
-    if (!memberId) throw new Error('Member is required.');
+    const isGuest = Boolean(payload.isGuest);
+    const memberId = isGuest ? null : Number(payload.memberId);
+    const guestName = String(payload.guestName || '').trim();
+    if (!isGuest && !memberId) throw new Error('Member is required.');
+    if (isGuest && !guestName) throw new Error('Guest name is required.');
     const serviceDate = toDateString(payload.serviceDate);
     if (!serviceDate) throw new Error('Service date is required.');
     const allowSingleAssignee = Boolean(payload.allowSingleAssignee);
@@ -871,6 +920,7 @@ class DataService {
       .prepare(
         `UPDATE entries
          SET member_id = @memberId,
+             guest_name = @guestName,
              service_date = @serviceDate,
              service_type = @serviceType,
              assigned_deacon_1_user_id = @assignedDeacon1UserId,
@@ -886,6 +936,7 @@ class DataService {
       .run({
         id,
         memberId,
+        guestName: isGuest ? guestName : null,
         serviceDate,
         serviceType: payload.serviceType,
         assignedDeacon1UserId,
@@ -1049,22 +1100,27 @@ class DataService {
   getReport(filters = {}) {
     const dateFrom = toDateString(filters.dateFrom) || '1900-01-01';
     const dateTo = toDateString(filters.dateTo) || '2999-12-31';
+    const reportType = normalizeReportType(filters.reportType);
 
     const rows = this.db
       .prepare(
         `SELECT
-           m.id AS memberId,
+           COALESCE(m.id, -e.id) AS memberId,
            m.member_code AS memberCode,
-           m.full_name AS memberName,
+           COALESCE(m.full_name, e.guest_name, 'Guest') AS memberName,
            SUM(e.tithes) AS tithes,
            SUM(e.faith_promise) AS faithPromise,
            SUM(e.thanksgiving) AS thanksgiving,
-           SUM(e.tithes + e.faith_promise + e.thanksgiving) AS total
+           ${
+             reportType === 'thanksgiving'
+               ? 'SUM(e.thanksgiving)'
+               : 'SUM(e.tithes + e.faith_promise)'
+           } AS total
          FROM entries e
-         INNER JOIN members m ON m.id = e.member_id
+         LEFT JOIN members m ON m.id = e.member_id
          WHERE e.service_date BETWEEN @dateFrom AND @dateTo
-         GROUP BY m.id, m.member_code, m.full_name
-         ORDER BY m.full_name ASC`
+         GROUP BY COALESCE(m.id, -e.id), m.member_code, COALESCE(m.full_name, e.guest_name, 'Guest')
+         ORDER BY COALESCE(m.full_name, e.guest_name, 'Guest') ASC`
       )
       .all({ dateFrom, dateTo });
 
@@ -1074,22 +1130,35 @@ class DataService {
            SUM(tithes) AS tithes,
            SUM(faith_promise) AS faithPromise,
            SUM(thanksgiving) AS thanksgiving,
-           SUM(tithes + faith_promise + thanksgiving) AS total
+           ${
+             reportType === 'thanksgiving'
+               ? 'SUM(thanksgiving)'
+               : 'SUM(tithes + faith_promise)'
+           } AS total
          FROM entries
          WHERE service_date BETWEEN @dateFrom AND @dateTo`
       )
       .get({ dateFrom, dateTo });
 
-    const auditedAmount = valueToNumber(summary?.total);
-    const useDeaconLooseOffering = Boolean(filters.useDeaconLooseOffering);
-    const looseFromDeacons = useDeaconLooseOffering
-      ? this.getDeaconLooseOfferingSummary(dateFrom, dateTo).looseOfferings
-      : null;
-    const looseOfferings =
-      looseFromDeacons === null
-        ? auditedAmount - valueToNumber(filters.actualMoneyOnHand)
-        : valueToNumber(looseFromDeacons);
-    const actualMoneyOnHand = auditedAmount - looseOfferings;
+    const reportTotal = valueToNumber(summary?.total);
+    let auditedAmount = 0;
+    let looseOfferings = 0;
+    let actualMoneyOnHand = 0;
+    if (reportType === 'thanksgiving') {
+      auditedAmount = reportTotal;
+      actualMoneyOnHand = reportTotal;
+    } else {
+      auditedAmount = reportTotal;
+      const useDeaconLooseOffering = Boolean(filters.useDeaconLooseOffering);
+      const looseFromDeacons = useDeaconLooseOffering
+        ? this.getDeaconLooseOfferingSummary(dateFrom, dateTo).looseOfferings
+        : null;
+      looseOfferings =
+        looseFromDeacons === null
+          ? auditedAmount - valueToNumber(filters.actualMoneyOnHand)
+          : valueToNumber(looseFromDeacons);
+      actualMoneyOnHand = auditedAmount - looseOfferings;
+    }
 
     const signatory = {
       adminName: String(filters.adminName || '').trim(),
@@ -1105,6 +1174,7 @@ class DataService {
     }
 
     return {
+      reportType,
       dateFrom,
       dateTo,
       rows,
@@ -1116,7 +1186,7 @@ class DataService {
         thanksgiving: valueToNumber(summary?.thanksgiving),
         auditedAmount,
         actualMoneyOnHand,
-        total: auditedAmount,
+        total: reportTotal,
       },
     };
   }
@@ -1138,31 +1208,34 @@ class DataService {
     return this.getGeneratedReportById(result.lastInsertRowid);
   }
 
-  findGeneratedReportExact(dateFrom, dateTo) {
-    const row = this.db
+  findGeneratedReportExact(dateFrom, dateTo, reportType) {
+    const normalizedType = normalizeReportType(reportType);
+    const rows = this.db
       .prepare(
         `SELECT id, date_from AS dateFrom, date_to AS dateTo, report_json AS reportJson, created_at AS createdAt
          FROM generated_reports
          WHERE date_from = @dateFrom AND date_to = @dateTo
-         ORDER BY id DESC
-         LIMIT 1`
+         ORDER BY id DESC`
       )
-      .get({ dateFrom: String(dateFrom), dateTo: String(dateTo) });
+      .all({ dateFrom: String(dateFrom), dateTo: String(dateTo) });
 
-    if (!row) return null;
-    let report = null;
-    try {
-      report = JSON.parse(String(row.reportJson || '{}'));
-    } catch {
-      report = null;
+    for (const row of rows) {
+      let report = null;
+      try {
+        report = JSON.parse(String(row.reportJson || '{}'));
+      } catch {
+        report = null;
+      }
+      if (normalizeReportType(report?.reportType) !== normalizedType) continue;
+      return {
+        id: row.id,
+        dateFrom: row.dateFrom,
+        dateTo: row.dateTo,
+        createdAt: row.createdAt,
+        report,
+      };
     }
-    return {
-      id: row.id,
-      dateFrom: row.dateFrom,
-      dateTo: row.dateTo,
-      createdAt: row.createdAt,
-      report,
-    };
+    return null;
   }
 
   getGeneratedReportById(id) {
@@ -1185,25 +1258,49 @@ class DataService {
       dateFrom: row.dateFrom,
       dateTo: row.dateTo,
       createdAt: row.createdAt,
-      report,
+      report: report
+        ? {
+            ...report,
+            reportType: normalizeReportType(report.reportType),
+          }
+        : report,
     };
   }
 
   listGeneratedReports(filters = {}) {
     const dateFrom = toDateString(filters.dateFrom) || '1900-01-01';
     const dateTo = toDateString(filters.dateTo) || '2999-12-31';
-    return this.db
+    const reportType = normalizeReportType(filters.reportType);
+    const rows = this.db
       .prepare(
         `SELECT
            id,
            date_from AS dateFrom,
            date_to AS dateTo,
+           report_json AS reportJson,
            created_at AS createdAt
          FROM generated_reports
          WHERE date_from >= @dateFrom AND date_to <= @dateTo
          ORDER BY created_at DESC, id DESC`
       )
       .all({ dateFrom, dateTo });
+    return rows
+      .map((row) => {
+        let parsed = null;
+        try {
+          parsed = JSON.parse(String(row.reportJson || '{}'));
+        } catch {
+          parsed = null;
+        }
+        return {
+          id: row.id,
+          dateFrom: row.dateFrom,
+          dateTo: row.dateTo,
+          reportType: normalizeReportType(parsed?.reportType),
+          createdAt: row.createdAt,
+        };
+      })
+      .filter((row) => row.reportType === reportType);
   }
 
   deleteGeneratedReport(id) {
@@ -1219,6 +1316,7 @@ class DataService {
   exportGeneratedReportWorkbook(targetPath, generatedReportId) {
     const item = this.getGeneratedReportById(generatedReportId);
     return this.exportReportWorkbook(targetPath, {
+      reportType: item.report?.reportType || 'tithes-offerings',
       dateFrom: item.report?.dateFrom || item.dateFrom,
       dateTo: item.report?.dateTo || item.dateTo,
       adminName: item.report?.signatory?.adminName || '',
@@ -1236,36 +1334,44 @@ class DataService {
     const wb = XLSX.utils.book_new();
 
     const detailSheet = XLSX.utils.json_to_sheet(
-      report.rows.map((row) => ({
-        MemberCode: row.memberCode || '',
-        MemberName: row.memberName,
-        Tithes: row.tithes,
-        FaithPromise: row.faithPromise,
-        Total: row.total,
-      }))
-    );
-    const thanksgivingSheet = XLSX.utils.json_to_sheet(
-      report.rows
-        .filter((row) => valueToNumber(row.thanksgiving) !== 0)
-        .map((row) => ({
-          MemberCode: row.memberCode || '',
-          MemberName: row.memberName,
-          Thanksgiving: row.thanksgiving,
-        }))
+      report.reportType === 'thanksgiving'
+        ? report.rows
+            .filter((row) => valueToNumber(row.thanksgiving) !== 0)
+            .map((row) => ({
+              MemberCode: row.memberCode || '',
+              MemberName: row.memberName,
+              Thanksgiving: row.thanksgiving,
+              Total: row.total,
+            }))
+        : report.rows.map((row) => ({
+            MemberCode: row.memberCode || '',
+            MemberName: row.memberName,
+            Tithes: row.tithes,
+            FaithPromise: row.faithPromise,
+            Total: row.total,
+          }))
     );
 
     const summarySheet = XLSX.utils.json_to_sheet([
-      {
-        DateFrom: report.dateFrom,
-        DateTo: report.dateTo,
-        Tithes: report.summary.tithes,
-        FaithPromise: report.summary.faithPromise,
-        AuditedAmount: report.summary.auditedAmount,
-        ActualMoneyOnHand: report.summary.actualMoneyOnHand,
-        LooseOfferings: report.summary.looseOfferings,
-        Thanksgiving: report.summary.thanksgiving,
-        Total: report.summary.total,
-      },
+      report.reportType === 'thanksgiving'
+        ? {
+            ReportType: 'Thanksgiving',
+            DateFrom: report.dateFrom,
+            DateTo: report.dateTo,
+            Thanksgiving: report.summary.thanksgiving,
+            Total: report.summary.total,
+          }
+        : {
+            ReportType: 'Tithes and Offerings',
+            DateFrom: report.dateFrom,
+            DateTo: report.dateTo,
+            Tithes: report.summary.tithes,
+            FaithPromise: report.summary.faithPromise,
+            AuditedAmount: report.summary.auditedAmount,
+            ActualMoneyOnHand: report.summary.actualMoneyOnHand,
+            LooseOfferings: report.summary.looseOfferings,
+            Total: report.summary.total,
+          },
     ]);
 
     const signatoryRows = [];
@@ -1276,8 +1382,11 @@ class DataService {
     const signatoriesSheet = XLSX.utils.json_to_sheet(signatoryRows.length ? signatoryRows : [{ Role: '', Name: '' }]);
 
     XLSX.utils.book_append_sheet(wb, summarySheet, 'Summary');
-    XLSX.utils.book_append_sheet(wb, detailSheet, 'Details');
-    XLSX.utils.book_append_sheet(wb, thanksgivingSheet, 'Thanksgiving');
+    XLSX.utils.book_append_sheet(
+      wb,
+      detailSheet,
+      report.reportType === 'thanksgiving' ? 'Thanksgiving' : 'TithesOfferings'
+    );
     XLSX.utils.book_append_sheet(wb, signatoriesSheet, 'Signatories');
     XLSX.writeFile(wb, targetPath);
 
@@ -1300,19 +1409,27 @@ class DataService {
     const membersSheet = XLSX.utils.json_to_sheet(
       members.map((m) => ({
         MemberCode: m.memberCode || '',
+        FirstName: m.firstName || '',
+        MiddleName: m.middleName || '',
+        LastName: m.lastName || '',
+        Suffix: m.suffix || '',
         FullName: m.fullName,
         Birthday: m.birthday || '',
-        Contact: m.contact || '',
+        ContactNumber: m.contact || '',
         Address: m.address || '',
       }))
     );
 
     const entriesSheet = XLSX.utils.json_to_sheet(
       entries.map((e) => ({
+        EntryType: e.memberId ? 'Member' : 'Guest',
         MemberName: e.memberName,
+        GuestName: e.guestName || '',
         MemberCode: e.memberCode || '',
         ServiceDate: e.serviceDate,
         ServiceType: e.serviceType,
+        AssignedDeacon1: e.assignedDeacon1Name || '',
+        AssignedDeacon2: e.assignedDeacon2Name || '',
         Tithes: e.tithes,
         FaithPromise: e.faithPromise,
         LooseOfferings: e.looseOfferings,
@@ -1383,6 +1500,7 @@ class DataService {
         `SELECT
            id,
            member_id AS memberId,
+           guest_name AS guestName,
            service_date AS serviceDate,
            service_type AS serviceType,
            assigned_deacon_1_user_id AS assignedDeacon1UserId,
@@ -1430,7 +1548,7 @@ class DataService {
       .all();
 
     return {
-      schemaVersion: 2,
+      schemaVersion: 3,
       exportedAt: this.now(),
       source: {
         appName: 'FaithFlow - BBC Tithes and Offerings',
@@ -1469,9 +1587,9 @@ class DataService {
       );
       const insertEntry = this.db.prepare(
         `INSERT INTO entries
-        (id, member_id, service_date, service_type, assigned_deacon_1_user_id, assigned_deacon_2_user_id, tithes, faith_promise, loose_offerings, thanksgiving, notes, created_at, updated_at)
+        (id, member_id, guest_name, service_date, service_type, assigned_deacon_1_user_id, assigned_deacon_2_user_id, tithes, faith_promise, loose_offerings, thanksgiving, notes, created_at, updated_at)
         VALUES
-        (@id, @memberId, @serviceDate, @serviceType, @assignedDeacon1UserId, @assignedDeacon2UserId, @tithes, @faithPromise, @looseOfferings, @thanksgiving, @notes, @createdAt, @updatedAt)`
+        (@id, @memberId, @guestName, @serviceDate, @serviceType, @assignedDeacon1UserId, @assignedDeacon2UserId, @tithes, @faithPromise, @looseOfferings, @thanksgiving, @notes, @createdAt, @updatedAt)`
       );
       const insertUser = this.db.prepare(
         `INSERT INTO users
@@ -1529,9 +1647,13 @@ class DataService {
       for (const e of parsed.data.entries) {
         const serviceType = String(e.serviceType || '').trim();
         if (!SERVICE_TYPES.has(serviceType)) continue;
+        const memberId = Number(e.memberId || 0);
+        const guestName = String(e.guestName || '').trim();
+        if (!memberId && !guestName) continue;
         insertEntry.run({
           id: Number(e.id),
-          memberId: Number(e.memberId),
+          memberId: memberId || null,
+          guestName: guestName || null,
           serviceDate: toDateString(e.serviceDate),
           serviceType,
           assignedDeacon1UserId: e.assignedDeacon1UserId ? Number(e.assignedDeacon1UserId) : null,
@@ -1614,24 +1736,46 @@ class DataService {
       this.db.prepare('DELETE FROM members').run();
 
       const insertMember = this.db.prepare(
-        `INSERT INTO members (member_code, full_name, birthday, contact, address, created_at, updated_at)
-         VALUES (@memberCode, @fullName, @birthday, @contact, @address, @createdAt, @updatedAt)`
+        `INSERT INTO members
+         (member_code, first_name, middle_name, last_name, suffix, full_name, birthday, contact, address, created_at, updated_at)
+         VALUES
+         (@memberCode, @firstName, @middleName, @lastName, @suffix, @fullName, @birthday, @contact, @address, @createdAt, @updatedAt)`
       );
 
       const now = this.now();
       const memberMap = new Map();
 
       for (const row of members) {
-        const fullName = String(row.FullName || '').trim();
-        if (!fullName) continue;
+        const firstName = String(row.FirstName || row['First Name'] || '').trim();
+        const middleName = String(row.MiddleName || row['Middle Name'] || '').trim();
+        const lastName = String(row.LastName || row['Last Name'] || '').trim();
+        const suffix = String(row.Suffix || '').trim();
+        const legacyFullName = String(row.FullName || '').trim();
+        let resolvedFirstName = firstName;
+        let resolvedMiddleName = middleName;
+        let resolvedLastName = lastName;
+        if ((!resolvedFirstName || !resolvedLastName) && legacyFullName) {
+          const parts = legacyFullName.split(/\s+/).filter(Boolean);
+          resolvedFirstName = resolvedFirstName || parts[0] || '';
+          resolvedLastName = resolvedLastName || (parts.length > 1 ? parts[parts.length - 1] : '');
+          if (!resolvedMiddleName && parts.length > 2) {
+            resolvedMiddleName = parts.slice(1, -1).join(' ');
+          }
+        }
+        const fullName = [resolvedFirstName, resolvedMiddleName, resolvedLastName, suffix].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
+        if (!resolvedFirstName || !resolvedLastName || !fullName) continue;
 
         const memberCode = String(row.MemberCode || '').trim() || this.nextMemberCode();
 
         const result = insertMember.run({
           memberCode,
+          firstName: resolvedFirstName,
+          middleName: resolvedMiddleName || null,
+          lastName: resolvedLastName,
+          suffix: suffix || null,
           fullName,
           birthday: toDateString(row.Birthday) || null,
-          contact: String(row.Contact || '').trim() || null,
+          contact: String(row.ContactNumber || row.Contact || '').trim() || null,
           address: String(row.Address || '').trim() || null,
           createdAt: now,
           updatedAt: now,
@@ -1642,9 +1786,9 @@ class DataService {
 
       const insertEntry = this.db.prepare(
         `INSERT INTO entries
-        (member_id, service_date, service_type, assigned_deacon_1_user_id, assigned_deacon_2_user_id, tithes, faith_promise, loose_offerings, thanksgiving, notes, created_at, updated_at)
+        (member_id, guest_name, service_date, service_type, assigned_deacon_1_user_id, assigned_deacon_2_user_id, tithes, faith_promise, loose_offerings, thanksgiving, notes, created_at, updated_at)
         VALUES
-        (@memberId, @serviceDate, @serviceType, @assignedDeacon1UserId, @assignedDeacon2UserId, @tithes, @faithPromise, @looseOfferings, @thanksgiving, @notes, @createdAt, @updatedAt)`
+        (@memberId, @guestName, @serviceDate, @serviceType, @assignedDeacon1UserId, @assignedDeacon2UserId, @tithes, @faithPromise, @looseOfferings, @thanksgiving, @notes, @createdAt, @updatedAt)`
       );
 
       const deacons = this.listDeacons();
@@ -1655,11 +1799,15 @@ class DataService {
       }
 
       for (const row of entries) {
+        const entryType = String(row.EntryType || '').trim().toLowerCase();
         const memberName = String(row.MemberName || '').trim();
-        if (!memberName) continue;
+        const guestName = String(row.GuestName || '').trim();
+        const isGuest = entryType === 'guest' || (!memberName && !!guestName);
+        if (!isGuest && !memberName) continue;
+        if (isGuest && !guestName && !memberName) continue;
 
-        const memberId = memberMap.get(memberName.toLowerCase());
-        if (!memberId) continue;
+        const memberId = isGuest ? null : memberMap.get(memberName.toLowerCase());
+        if (!isGuest && !memberId) continue;
 
         const serviceType = String(row.ServiceType || '').trim();
         if (!SERVICE_TYPES.has(serviceType)) continue;
@@ -1669,6 +1817,7 @@ class DataService {
 
         insertEntry.run({
           memberId,
+          guestName: isGuest ? guestName || memberName || 'Guest' : null,
           serviceDate,
           serviceType,
           assignedDeacon1UserId: deaconByName.get(String(row.AssignedDeacon1 || '').trim().toLowerCase()) || null,
