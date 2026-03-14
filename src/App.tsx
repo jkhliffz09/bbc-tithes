@@ -1472,6 +1472,12 @@ function App() {
   const isPastorRole = role === 'Pastor';
   const isDeaconRole = role === 'Deacon' || role === 'Pastor';
   const isThanksgivingReport = reportType === 'thanksgiving';
+  const liveExpenseTotal = reportPreview?.summary.expensesTotal ?? report?.summary.expensesTotal ?? 0;
+  const liveCashOnHandValue = isThanksgivingReport
+    ? 0
+    : isDeaconRole
+      ? amount(reportAudit.actualMoneyOnHand) - liveExpenseTotal
+      : (reportPreview?.summary.cashOnNet ?? report?.summary.cashOnNet ?? 0);
   const reportDeacon1 = reportPreview?.signatory.deacon1Name || report?.signatory.deacon1Name || '';
   const reportDeacon2 = reportPreview?.signatory.deacon2Name || report?.signatory.deacon2Name || '';
   const canEditEntries = can(role, 'entries.update') || requiresAdminEntryApproval(role);
@@ -2302,7 +2308,7 @@ function App() {
                       />
                     </label>
                     <label>
-                      Cash on Hand
+                      Cash Count
                       <input
                         type="number"
                         min="0"
@@ -2322,12 +2328,12 @@ function App() {
                       />
                     </label>
                     <label>
-                      C.O.N
+                      Cash on Hand
                       <input
                         type="number"
                         min="0"
                         step="0.01"
-                        value={String(reportPreview?.summary.cashOnNet ?? report?.summary.cashOnNet ?? 0)}
+                        value={String(liveCashOnHandValue)}
                         readOnly
                       />
                     </label>
@@ -2356,12 +2362,12 @@ function App() {
                       />
                     </label>
                     <label>
-                      C.O.N
+                      Cash on Hand
                       <input
                         type="number"
                         min="0"
                         step="0.01"
-                        value={String(reportPreview?.summary.cashOnNet ?? report?.summary.cashOnNet ?? 0)}
+                        value={String(liveCashOnHandValue)}
                         readOnly
                       />
                     </label>
@@ -2451,11 +2457,10 @@ function App() {
                   {report.reportType === 'tithes-offerings' && (
                     <div className="totals">
                       <div>Total Audited Amount: {money(report.summary.auditedAmount)}</div>
-                      <div>Cash on Hand: {money(report.summary.actualMoneyOnHand)}</div>
-                      <div>Loss / Excess: {money(report.summary.variance)}</div>
+                      <div>Cash Count: {money(report.summary.actualMoneyOnHand)}</div>
                       <div className="grand">Loose Offerings: {money(report.summary.looseOfferings)}</div>
                       <div>Total Expenses: {money(report.summary.expensesTotal)}</div>
-                      <div className="grand">C.O.N: {money(report.summary.cashOnNet)}</div>
+                      <div className="grand">Cash on Hand: {money(report.summary.cashOnNet)}</div>
                     </div>
                   )}
                   {report.reportType === 'tithes-offerings' && (
@@ -2705,35 +2710,23 @@ function App() {
       )}
       {!!serverVersions.length && (
         <div className="modal-backdrop" role="presentation">
-          <section className="modal-card">
+          <section className="modal-card modal-card-wide">
             <h3>Download from Server</h3>
             <p className="muted">Select which uploaded backup version to restore for this Church Key.</p>
-            <div className="table-wrap" style={{ maxHeight: '22rem' }}>
-              <table>
-                <thead>
-                  <tr>
-                    <th>Version</th>
-                    <th>Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {serverVersions.map((version) => (
-                    <tr key={version.versionId}>
-                      <td>{formatServerVersionLabel(version)}</td>
-                      <td>
-                        <button
-                          type="button"
-                          className="tiny"
-                          onClick={() => void downloadServerVersion(version.versionId)}
-                          disabled={busy}
-                        >
-                          Download
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div className="version-list">
+              {serverVersions.map((version) => (
+                <article key={version.versionId} className="version-card">
+                  <div className="version-name">{formatServerVersionLabel(version)}</div>
+                  <button
+                    type="button"
+                    className="tiny version-download"
+                    onClick={() => void downloadServerVersion(version.versionId)}
+                    disabled={busy}
+                  >
+                    Download
+                  </button>
+                </article>
+              ))}
             </div>
             <div className="row-actions">
               <button type="button" className="secondary" onClick={() => setServerVersions([])}>

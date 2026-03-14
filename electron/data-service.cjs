@@ -1525,11 +1525,10 @@ class DataService {
             Tithes: report.summary.tithes,
             FaithPromise: report.summary.faithPromise,
             AuditedAmount: report.summary.auditedAmount,
-            CashOnHand: report.summary.actualMoneyOnHand,
-            Variance: report.summary.variance,
+            CashCount: report.summary.actualMoneyOnHand,
             LooseOfferings: report.summary.looseOfferings,
             TotalExpenses: report.summary.expensesTotal,
-            CON: report.summary.cashOnNet,
+            CashOnHand: report.summary.cashOnNet,
             Total: report.summary.total,
           },
     ]);
