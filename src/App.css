@@ -85,7 +85,7 @@ button:disabled {
 }
 
 .content {
-  @apply grid;
+  @apply grid min-w-0;
 }
 
 .panel {
@@ -101,7 +101,7 @@ button:disabled {
 }
 
 .split-panels > article {
-  @apply min-w-0 overflow-hidden rounded-xl border border-slate-300 bg-white p-4;
+  @apply relative min-w-0 overflow-visible rounded-xl border border-slate-300 bg-white p-4;
 }
 
 .panel.single {
@@ -247,7 +247,7 @@ tfoot th {
 }
 
 .modal-backdrop {
-  @apply fixed inset-0 z-50 grid place-items-center bg-slate-950/40 p-4;
+  @apply fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-slate-950/40 p-4;
 }
 
 .modal-card {

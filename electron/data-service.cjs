@@ -809,7 +809,7 @@ class DataService {
          LEFT JOIN users d1 ON d1.id = e.assigned_deacon_1_user_id
          LEFT JOIN users d2 ON d2.id = e.assigned_deacon_2_user_id
          ${where}
-         ORDER BY e.service_date DESC, m.full_name ASC`
+         ORDER BY e.service_date DESC, e.created_at ASC, e.id ASC`
       )
       .all(params);
   }

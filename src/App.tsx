@@ -49,6 +49,9 @@ type ExpenseForm = {
   notes: string;
 };
 
+type DenominationValue = 1 | 5 | 10 | 20 | 50 | 100 | 200 | 500 | 1000;
+type DenominationCounts = Record<DenominationValue, string>;
+
 type PendingEntryAction =
   | { type: 'update'; payload: { id: number; isGuest: boolean; guestName: string; memberId: number | null; serviceDate: string; serviceType: ServiceType; assignedDeacon1UserId: number; assignedDeacon2UserId: number | null; allowSingleAssignee?: boolean; tithes: number; faithPromise: number; thanksgiving: number; notes: string } }
   | { type: 'delete'; entryId: number };
@@ -145,6 +148,19 @@ const emptyExpenseForm: ExpenseForm = {
   notes: '',
 };
 
+const DENOMINATION_VALUES: DenominationValue[] = [1, 5, 10, 20, 50, 100, 200, 500, 1000];
+const emptyDenominationCounts = (): DenominationCounts => ({
+  1: '0',
+  5: '0',
+  10: '0',
+  20: '0',
+  50: '0',
+  100: '0',
+  200: '0',
+  500: '0',
+  1000: '0',
+});
+
 function amount(v: string): number {
   const parsed = Number(v);
   return Number.isFinite(parsed) ? parsed : 0;
@@ -152,6 +168,10 @@ function amount(v: string): number {
 
 function money(v: number): string {
   return new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP' }).format(v || 0);
+}
+
+function denominationTotal(counts: DenominationCounts): number {
+  return DENOMINATION_VALUES.reduce((sum, value) => sum + value * amount(counts[value]), 0);
 }
 
 function normalizeRole(role: unknown): Role | null {
@@ -378,6 +398,7 @@ function App() {
   const [selectedDate, setSelectedDate] = useState(initialDate);
   const [entries, setEntries] = useState<Entry[]>([]);
   const [entryForm, setEntryForm] = useState<EntryForm>(emptyEntryForm);
+  const [submittedEntrySearch, setSubmittedEntrySearch] = useState('');
   const [selectedExpenseDate, setSelectedExpenseDate] = useState(initialDate);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [expenseForm, setExpenseForm] = useState<ExpenseForm>(emptyExpenseForm);
@@ -410,6 +431,8 @@ function App() {
   const [syncMode, setSyncMode] = useState<SyncDialogMode>(null);
   const [syncProgress, setSyncProgress] = useState<'upload' | 'download' | 'versions' | null>(null);
   const [serverVersions, setServerVersions] = useState<SyncServerVersion[]>([]);
+  const [showDenominationDialog, setShowDenominationDialog] = useState(false);
+  const [denominationCounts, setDenominationCounts] = useState<DenominationCounts>(emptyDenominationCounts());
   const [syncForm, setSyncForm] = useState<SyncConfig>({
     serverUrl: localStorage.getItem(SYNC_STORAGE_KEYS.serverUrl) || '',
     apiToken: localStorage.getItem(SYNC_STORAGE_KEYS.apiToken) || '',
@@ -581,6 +604,20 @@ function App() {
 
   const monthGrandTotal =
     monthTotals.tithes + monthTotals.faithPromise + monthTotals.thanksgiving;
+
+  const filteredSubmittedEntries = useMemo(() => {
+    const query = submittedEntrySearch.trim().toLowerCase();
+    if (!query) return entries;
+    return entries.filter((entry) => {
+      const givingText = [entry.tithes, entry.faithPromise, entry.thanksgiving].join(' ');
+      return (
+        String(entry.memberName || '').toLowerCase().includes(query) ||
+        String(entry.memberCode || '').toLowerCase().includes(query) ||
+        String(entry.notes || '').toLowerCase().includes(query) ||
+        givingText.includes(query)
+      );
+    });
+  }, [entries, submittedEntrySearch]);
 
   const memberEntryTotals = memberEntries.reduce(
     (acc, entry) => {
@@ -755,6 +792,17 @@ function App() {
       const user = await run('', () => window.faithflow.currentUser());
       if (user) setAuthUser(user);
     })();
+  }, []);
+
+  useEffect(() => {
+    const handleWheel = (event: WheelEvent) => {
+      const active = document.activeElement;
+      if (active instanceof HTMLInputElement && active.type === 'number') {
+        event.preventDefault();
+      }
+    };
+    document.addEventListener('wheel', handleWheel, { passive: false, capture: true });
+    return () => document.removeEventListener('wheel', handleWheel, true);
   }, []);
 
   useEffect(() => {
@@ -1400,6 +1448,20 @@ function App() {
     setToast(`Report PDF exported to ${result.path || 'selected path'}.`);
   }
 
+  function openDenominationDialog() {
+    setDenominationCounts(emptyDenominationCounts());
+    setShowDenominationDialog(true);
+  }
+
+  function applyDenominations(event: FormEvent) {
+    event.preventDefault();
+    setReportAudit((prev) => ({
+      ...prev,
+      actualMoneyOnHand: String(denominationTotal(denominationCounts)),
+    }));
+    setShowDenominationDialog(false);
+  }
+
   async function submitSyncToServer(event: FormEvent) {
     event.preventDefault();
     if (!syncMode) return;
@@ -2039,17 +2101,24 @@ function App() {
             <article>
               <div className="split-header">
                 <h2>Giving Entries</h2>
-                <label>
-                  Day
+                <div className="search-row">
                   <input
-                    type="date"
-                    value={selectedDate}
-                    onChange={(e) => {
-                      setSelectedDate(e.target.value);
-                      void loadEntries(e.target.value);
-                    }}
+                    placeholder="Search submitted giving"
+                    value={submittedEntrySearch}
+                    onChange={(e) => setSubmittedEntrySearch(e.target.value)}
                   />
-                </label>
+                  <label>
+                    Day
+                    <input
+                      type="date"
+                      value={selectedDate}
+                      onChange={(e) => {
+                        setSelectedDate(e.target.value);
+                        void loadEntries(e.target.value);
+                      }}
+                    />
+                  </label>
+                </div>
               </div>
 
               <div className="totals">
@@ -2063,6 +2132,7 @@ function App() {
                 <table>
                   <thead>
                     <tr>
+                      <th>#</th>
                       <th>Date</th>
                       <th>Member</th>
                       <th>Giving</th>
@@ -2071,10 +2141,11 @@ function App() {
                     </tr>
                   </thead>
                   <tbody>
-                    {entries.map((entry) => {
+                    {filteredSubmittedEntries.map((entry, index) => {
                       const total = entry.tithes + entry.faithPromise + entry.thanksgiving;
                       return (
                         <tr key={entry.id}>
+                          <td>{index + 1}</td>
                           <td>
                             <div>{entry.serviceDate}</div>
                             <small className="muted">{entry.serviceType}</small>
@@ -2097,6 +2168,11 @@ function App() {
                         </tr>
                       );
                     })}
+                    {filteredSubmittedEntries.length === 0 && (
+                      <tr>
+                        <td colSpan={6} className="muted">No submitted giving entries found.</td>
+                      </tr>
+                    )}
                   </tbody>
                 </table>
               </div>
@@ -2317,6 +2393,11 @@ function App() {
                         onChange={(e) => setReportAudit((p) => ({ ...p, actualMoneyOnHand: e.target.value }))}
                       />
                     </label>
+                    <div className="row-actions">
+                      <button type="button" className="secondary tiny" onClick={openDenominationDialog}>
+                        Denominations
+                      </button>
+                    </div>
                     <label>
                       Total Expenses
                       <input
@@ -2733,6 +2814,43 @@ function App() {
                 Close
               </button>
             </div>
+          </section>
+        </div>
+      )}
+      {showDenominationDialog && (
+        <div className="modal-backdrop" role="presentation">
+          <section className="modal-card">
+            <h3>Cash Count Denominations</h3>
+            <form className="form" onSubmit={applyDenominations}>
+              <div className="grid-inline">
+                {DENOMINATION_VALUES.map((value) => (
+                  <label key={value}>
+                    {value}
+                    <input
+                      type="number"
+                      min="0"
+                      step="1"
+                      value={denominationCounts[value]}
+                      onChange={(e) =>
+                        setDenominationCounts((prev) => ({
+                          ...prev,
+                          [value]: e.target.value,
+                        }))
+                      }
+                    />
+                  </label>
+                ))}
+              </div>
+              <div className="totals">
+                <div className="grand">Total Cash Count: {money(denominationTotal(denominationCounts))}</div>
+              </div>
+              <div className="row-actions">
+                <button type="submit">Apply</button>
+                <button type="button" className="secondary" onClick={() => setShowDenominationDialog(false)}>
+                  Cancel
+                </button>
+              </div>
+            </form>
           </section>
         </div>
       )}
