@@ -1523,29 +1523,40 @@ function App() {
   if (!authUser) {
     return (
       <div className="app-shell login-shell">
-        <section className="panel login-panel w-full max-w-md rounded-2xl border border-slate-200 bg-white/95 p-6 shadow-xl">
-          <img src="logo-placeholder.svg" alt="BBC Logo" className="login-logo" />
-          <h1 className="text-2xl font-semibold tracking-tight text-slate-800">FaithFlow - BBC Tithes and Offerings</h1>
-          <p className="text-slate-500">Sign in to continue.</p>
-          <form className="form" onSubmit={login}>
-            <label>
-              Username
+        <section className="login-panel">
+          <span className="login-accent login-accent-top" aria-hidden="true" />
+          <span className="login-accent login-accent-bottom" aria-hidden="true" />
+          <div className="login-avatar">
+            <img src="logo-placeholder.svg" alt="BBC Logo" className="login-logo" />
+          </div>
+          <div className="login-copy">
+            <h1>Welcome Back</h1>
+            <p>Sign in to access FaithFlow - BBC Tithes and Offerings</p>
+          </div>
+          <form className="form login-form" onSubmit={login}>
+            <label className="login-field">
+              <span>Username</span>
               <input
                 value={loginForm.username}
                 onChange={(e) => setLoginForm((p) => ({ ...p, username: e.target.value }))}
+                placeholder="Enter your username"
                 required
               />
             </label>
-            <label>
-              Password
+            <label className="login-field">
+              <span>Password</span>
               <input
                 type="password"
                 value={loginForm.password}
                 onChange={(e) => setLoginForm((p) => ({ ...p, password: e.target.value }))}
+                placeholder="Enter your password"
                 required
               />
             </label>
-            <button type="submit" disabled={busy} className="w-full">
+            <div className="login-meta">
+              <span>Authorized church staff access only</span>
+            </div>
+            <button type="submit" disabled={busy} className="login-submit">
               Sign In
             </button>
           </form>

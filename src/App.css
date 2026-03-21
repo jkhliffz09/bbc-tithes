@@ -1,6 +1,6 @@
 body {
   @apply m-0 bg-slate-100 font-sans text-slate-900;
-  background-image: radial-gradient(circle at top right, #d9ecff, #f2f6fb 55%);
+  background-image: radial-gradient(circle at top right, #dfe8ff, #eef4ff 55%);
 }
 
 button,
@@ -37,15 +37,95 @@ button:disabled {
 }
 
 .login-shell {
-  @apply grid place-items-center;
+  @apply grid place-items-center bg-[#edf3ff];
+  background-image:
+    radial-gradient(circle at 18% 84%, rgba(255, 145, 197, 0.2) 0, rgba(255, 145, 197, 0.2) 8px, transparent 9px),
+    radial-gradient(circle at top right, rgba(173, 198, 255, 0.48), transparent 36%),
+    linear-gradient(180deg, #eef4ff 0%, #e8efff 100%);
 }
 
 .login-panel {
-  @apply w-full max-w-xl text-center;
+  @apply relative w-full max-w-[700px] overflow-hidden rounded-[30px] bg-white px-12 pb-10 pt-16 text-center shadow-[0_30px_90px_rgba(103,119,214,0.18)];
 }
 
 .login-logo {
-  @apply mx-auto mb-2 h-24 w-24 object-contain;
+  @apply h-16 w-16 object-contain;
+}
+
+.login-accent {
+  @apply absolute left-0 right-0 h-3;
+  background: linear-gradient(90deg, #6e7ff4 0%, #8c52ff 52%, #ff67ab 100%);
+}
+
+.login-accent-top {
+  @apply top-0;
+}
+
+.login-accent-bottom {
+  @apply bottom-0;
+}
+
+.login-avatar {
+  @apply mx-auto mb-8 grid h-28 w-28 place-items-center rounded-full bg-gradient-to-br from-indigo-600 via-violet-600 to-fuchsia-500 p-4 shadow-[0_18px_35px_rgba(107,70,255,0.35)];
+}
+
+.login-copy {
+  @apply mb-8;
+}
+
+.login-copy h1 {
+  @apply m-0 text-5xl font-semibold tracking-tight text-slate-800;
+}
+
+.login-copy p {
+  @apply mt-3 text-xl text-slate-500;
+}
+
+.login-form {
+  @apply mx-auto w-full max-w-[520px] gap-5 text-left;
+}
+
+.login-field {
+  @apply gap-2 text-base font-medium text-slate-700;
+}
+
+.login-field input {
+  @apply rounded-2xl border border-slate-200 px-5 py-4 text-lg shadow-[inset_0_1px_2px_rgba(15,23,42,0.05)];
+}
+
+.login-field input::placeholder {
+  @apply text-slate-400;
+}
+
+.login-meta {
+  @apply flex items-center justify-between pt-1 text-sm text-slate-500;
+}
+
+.login-submit {
+  @apply mt-2 w-full rounded-2xl border-0 py-4 text-xl font-semibold shadow-[0_16px_35px_rgba(106,78,255,0.32)];
+  background: linear-gradient(90deg, #4e46e5 0%, #6d35ff 52%, #8a3ffc 100%);
+}
+
+.login-submit:hover {
+  background: linear-gradient(90deg, #4338ca 0%, #5b21b6 52%, #7e22ce 100%);
+}
+
+@media (max-width: 700px) {
+  .login-panel {
+    @apply px-6 pb-8 pt-14;
+  }
+
+  .login-copy h1 {
+    @apply text-4xl;
+  }
+
+  .login-copy p {
+    @apply text-base;
+  }
+
+  .login-avatar {
+    @apply h-24 w-24;
+  }
 }
 
 .muted {
