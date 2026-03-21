@@ -170,6 +170,10 @@ function money(v: number): string {
   return new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP' }).format(v || 0);
 }
 
+function reportDifferenceMoney(label: string, value: number): string {
+  return money(label === 'Loose Offerings' ? -Math.abs(value || 0) : value || 0);
+}
+
 function denominationTotal(counts: DenominationCounts): number {
   return DENOMINATION_VALUES.reduce((sum, value) => sum + value * amount(counts[value]), 0);
 }
@@ -2582,7 +2586,7 @@ function App() {
                       </colgroup>
                       <thead>
                         <tr>
-                          <th>Code</th>
+                          <th>#</th>
                           <th>Member</th>
                           {report.reportType === 'thanksgiving' ? <th>Thanksgiving</th> : <th>Tithes</th>}
                           {report.reportType === 'thanksgiving' ? null : <th>Faith Promise</th>}
@@ -2590,9 +2594,9 @@ function App() {
                         </tr>
                       </thead>
                       <tbody>
-                        {report.rows.map((row) => (
-                          <tr key={row.memberId}>
-                            <td>{row.memberCode || '-'}</td>
+                        {report.rows.map((row, index) => (
+                          <tr key={`${row.memberId}-${index}`}>
+                            <td>{index + 1}</td>
                             <td>{row.memberName}</td>
                             <td>{money(report.reportType === 'thanksgiving' ? row.thanksgiving : row.tithes)}</td>
                             {report.reportType === 'thanksgiving' ? null : <td>{money(row.faithPromise)}</td>}
@@ -2700,7 +2704,7 @@ function App() {
                       <div>Total Offerings: {money(report.summary.auditedAmount)}</div>
                       <div>Cash Count: {money(report.summary.actualMoneyOnHand)}</div>
                       {report.summary.differenceLabel ? (
-                        <div className="grand">{report.summary.differenceLabel}: {money(report.summary.differenceAmount)}</div>
+                        <div className="grand">{report.summary.differenceLabel}: {reportDifferenceMoney(report.summary.differenceLabel, report.summary.differenceAmount)}</div>
                       ) : null}
                       <div>Total Expenses: {money(report.summary.expensesTotal)}</div>
                       <div className="grand">Cash on Hand: {money(report.summary.cashOnNet)}</div>

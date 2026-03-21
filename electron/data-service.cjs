@@ -1571,14 +1571,14 @@ class DataService {
       report.reportType === 'thanksgiving'
         ? report.rows
             .filter((row) => valueToNumber(row.thanksgiving) !== 0)
-            .map((row) => ({
-              MemberCode: row.memberCode || '',
+            .map((row, index) => ({
+              No: index + 1,
               MemberName: row.memberName,
               Thanksgiving: row.thanksgiving,
               Total: row.total,
             }))
-        : report.rows.map((row) => ({
-            MemberCode: row.memberCode || '',
+        : report.rows.map((row, index) => ({
+            No: index + 1,
             MemberName: row.memberName,
             Tithes: row.tithes,
             FaithPromise: row.faithPromise,
