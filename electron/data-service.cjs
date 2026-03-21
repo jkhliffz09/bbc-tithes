@@ -1212,20 +1212,29 @@ class DataService {
         (!!String(signatory.deacon1Name || '').trim() || !!String(signatory.deacon2Name || '').trim());
       if (!isDeaconGenerated) continue;
       if (!byDate.has(rDateFrom)) {
+        const differenceLabel = String(report?.summary?.differenceLabel || '').trim();
+        const differenceAmount = valueToNumber(report?.summary?.differenceAmount);
+        const legacyLoose = valueToNumber(report?.summary?.looseOfferings);
         byDate.set(rDateFrom, {
-          loose: valueToNumber(report?.summary?.looseOfferings),
+          loose: differenceLabel === 'Loose Offerings' ? differenceAmount : legacyLoose,
+          excess: differenceLabel === 'Excess' ? differenceAmount : 0,
           audited: valueToNumber(report?.summary?.auditedAmount),
+          note: String(report?.summary?.differenceNote || '').trim(),
         });
       }
     }
 
     let looseOfferings = 0;
+    let excessAmount = 0;
     let auditedAmount = 0;
+    const notes = [];
     for (const item of byDate.values()) {
       looseOfferings += valueToNumber(item.loose);
+      excessAmount += valueToNumber(item.excess);
       auditedAmount += valueToNumber(item.audited);
+      if (item.note) notes.push(item.note);
     }
-    return { looseOfferings, auditedAmount };
+    return { looseOfferings, excessAmount, auditedAmount, differenceNote: notes.join('\n') };
   }
 
   getReport(filters = {}) {
@@ -1281,21 +1290,40 @@ class DataService {
     let variance = 0;
     let expensesTotal = 0;
     let cashOnNet = 0;
+    let differenceLabel = 'Balanced';
+    let differenceAmount = 0;
+    let differenceNote = '';
     if (reportType === 'thanksgiving') {
       auditedAmount = reportTotal;
       actualMoneyOnHand = reportTotal;
     } else {
       auditedAmount = reportTotal;
       const useDeaconLooseOffering = Boolean(filters.useDeaconLooseOffering);
-      const looseFromDeacons = useDeaconLooseOffering
-        ? this.getDeaconLooseOfferingSummary(dateFrom, dateTo).looseOfferings
+      const deaconSummary = useDeaconLooseOffering
+        ? this.getDeaconLooseOfferingSummary(dateFrom, dateTo)
         : null;
-      looseOfferings =
-        looseFromDeacons === null
-          ? auditedAmount - valueToNumber(filters.actualMoneyOnHand)
-          : valueToNumber(looseFromDeacons);
-      actualMoneyOnHand = auditedAmount - looseOfferings;
+      if (deaconSummary) {
+        const netDifference = valueToNumber(deaconSummary.excessAmount) - valueToNumber(deaconSummary.looseOfferings);
+        actualMoneyOnHand = auditedAmount + netDifference;
+        differenceNote = String(deaconSummary.differenceNote || '').trim();
+      } else {
+        actualMoneyOnHand = valueToNumber(filters.actualMoneyOnHand);
+        differenceNote = String(filters.differenceNote || '').trim();
+      }
       variance = actualMoneyOnHand - auditedAmount;
+      if (variance < 0) {
+        differenceLabel = 'Loose Offerings';
+        differenceAmount = Math.abs(variance);
+        looseOfferings = differenceAmount;
+      } else if (variance > 0) {
+        differenceLabel = 'Excess';
+        differenceAmount = variance;
+        looseOfferings = 0;
+      } else {
+        differenceLabel = 'Balanced';
+        differenceAmount = 0;
+        looseOfferings = 0;
+      }
       expensesTotal = valueToNumber(expenseSummary.total);
       cashOnNet = actualMoneyOnHand - expensesTotal;
     }
@@ -1330,6 +1358,9 @@ class DataService {
         variance,
         expensesTotal,
         cashOnNet,
+        differenceLabel,
+        differenceAmount,
+        differenceNote,
         total: reportTotal,
       },
     };
@@ -1417,6 +1448,9 @@ class DataService {
               variance: valueToNumber(report?.summary?.variance),
               expensesTotal: valueToNumber(report?.summary?.expensesTotal),
               cashOnNet: valueToNumber(report?.summary?.cashOnNet),
+              differenceLabel: String(report?.summary?.differenceLabel || '').trim() || 'Balanced',
+              differenceAmount: valueToNumber(report?.summary?.differenceAmount || report?.summary?.looseOfferings),
+              differenceNote: String(report?.summary?.differenceNote || '').trim(),
               total: valueToNumber(report?.summary?.total),
             },
           }
@@ -1524,9 +1558,11 @@ class DataService {
             DateTo: report.dateTo,
             Tithes: report.summary.tithes,
             FaithPromise: report.summary.faithPromise,
-            AuditedAmount: report.summary.auditedAmount,
+            TotalOfferings: report.summary.auditedAmount,
             CashCount: report.summary.actualMoneyOnHand,
-            LooseOfferings: report.summary.looseOfferings,
+            DifferenceLabel: report.summary.differenceLabel,
+            DifferenceAmount: report.summary.differenceAmount,
+            DifferenceNote: report.summary.differenceNote,
             TotalExpenses: report.summary.expensesTotal,
             CashOnHand: report.summary.cashOnNet,
             Total: report.summary.total,

@@ -408,7 +408,7 @@ function App() {
     dateTo: initialDate,
   });
   const [reportType, setReportType] = useState<ReportType>('tithes-offerings');
-  const [reportAudit, setReportAudit] = useState({ actualMoneyOnHand: '' });
+  const [reportAudit, setReportAudit] = useState({ actualMoneyOnHand: '', differenceNote: '' });
   const [report, setReport] = useState<ReportPayload | null>(null);
   const [reportPreview, setReportPreview] = useState<ReportPayload | null>(null);
   const [generatedReports, setGeneratedReports] = useState<GeneratedReportItem[]>([]);
@@ -420,9 +420,10 @@ function App() {
         reportType?: ReportType;
         adminName?: string;
         accountingName?: string;
-        deacon1Name?: string;
+      deacon1Name?: string;
       deacon2Name?: string;
       actualMoneyOnHand?: number;
+      differenceNote?: string;
     };
   } | null>(null);
   const [pendingEntryAction, setPendingEntryAction] = useState<PendingEntryAction | null>(null);
@@ -433,6 +434,7 @@ function App() {
   const [serverVersions, setServerVersions] = useState<SyncServerVersion[]>([]);
   const [showDenominationDialog, setShowDenominationDialog] = useState(false);
   const [denominationCounts, setDenominationCounts] = useState<DenominationCounts>(emptyDenominationCounts());
+  const [generatedDownloadId, setGeneratedDownloadId] = useState<number | null>(null);
   const [syncForm, setSyncForm] = useState<SyncConfig>({
     serverUrl: localStorage.getItem(SYNC_STORAGE_KEYS.serverUrl) || '',
     apiToken: localStorage.getItem(SYNC_STORAGE_KEYS.apiToken) || '',
@@ -689,7 +691,7 @@ function App() {
     if (!can(authUser?.role || null, 'reports.generate')) return;
     const role = normalizeRole(authUser?.role);
     if ((role === 'Deacon' || role === 'Pastor') && reportType === 'tithes-offerings' && !String(reportAudit.actualMoneyOnHand).trim()) {
-      setError('Actual Money On Hand is required.');
+      setError('Cash Count is required.');
       return;
     }
     const filters =
@@ -699,12 +701,14 @@ function App() {
             dateTo: reportRange.dateFrom,
             reportType,
             actualMoneyOnHand: reportType === 'tithes-offerings' ? amount(reportAudit.actualMoneyOnHand) : 0,
+            differenceNote: reportType === 'tithes-offerings' ? reportAudit.differenceNote.trim() : '',
           }
         : {
             ...reportRange,
             reportType,
             adminName: authUser?.fullName || '',
             accountingName: '',
+            differenceNote: reportType === 'tithes-offerings' ? reportAudit.differenceNote.trim() : '',
             useDeaconLooseOffering: reportType === 'tithes-offerings',
           };
     const result = await run('', () => window.faithflow.generateReport(filters));
@@ -730,6 +734,7 @@ function App() {
             reportType,
             adminName: authUser?.fullName || '',
             accountingName: '',
+            differenceNote: reportType === 'tithes-offerings' ? reportAudit.differenceNote.trim() : '',
             useDeaconLooseOffering: reportType === 'tithes-offerings',
           };
     const data = await run('', () => window.faithflow.previewReport(filters));
@@ -755,10 +760,29 @@ function App() {
     setToast('Loaded generated report.');
   }
 
-  async function exportGeneratedReport(id: number) {
+  async function exportGeneratedReportExcel(id: number) {
     const result = await run('', () => window.faithflow.exportGeneratedReportExcel(id));
     if (!result || result.canceled) return;
+    setGeneratedDownloadId(null);
     setToast(`Generated report exported to ${result.path || 'selected path'}.`);
+  }
+
+  async function exportGeneratedReportPdf(id: number) {
+    const data = await run('', () => window.faithflow.getGeneratedReport(id));
+    if (!data) return;
+    setReportType(data.report.reportType || 'tithes-offerings');
+    setReport(data.report);
+    await new Promise((resolve) => window.setTimeout(resolve, 120));
+    const result = await run('', () =>
+      window.faithflow.exportReportPdf({
+        dateFrom: data.report.dateFrom,
+        dateTo: data.report.dateTo,
+        reportType: data.report.reportType,
+      })
+    );
+    if (!result || result.canceled) return;
+    setGeneratedDownloadId(null);
+    setToast(`Generated report PDF exported to ${result.path || 'selected path'}.`);
   }
 
   async function printGeneratedReport(id: number) {
@@ -868,7 +892,7 @@ function App() {
       setMemberEntrySearch('');
       setReportRange({ dateFrom: initialDate, dateTo: initialDate });
       setReportType('tithes-offerings');
-      setReportAudit({ actualMoneyOnHand: '' });
+      setReportAudit({ actualMoneyOnHand: '', differenceNote: '' });
       setTab('members');
     });
 
@@ -909,7 +933,7 @@ function App() {
     void loadGeneratedReports();
     void loadReportPreview();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [reportRange.dateFrom, reportRange.dateTo, reportType, authUser?.id]);
+  }, [reportRange.dateFrom, reportRange.dateTo, reportType, reportAudit.differenceNote, authUser?.id]);
 
   useEffect(() => {
     if (!authUser) return;
@@ -1408,7 +1432,7 @@ function App() {
   async function exportReportExcel() {
     const role = normalizeRole(authUser?.role);
     if ((role === 'Deacon' || role === 'Pastor') && reportType === 'tithes-offerings' && !String(reportAudit.actualMoneyOnHand).trim()) {
-      setError('Actual Money On Hand is required.');
+      setError('Cash Count is required.');
       return;
     }
     const filters =
@@ -1418,12 +1442,14 @@ function App() {
             dateTo: reportRange.dateFrom,
             reportType,
             actualMoneyOnHand: reportType === 'tithes-offerings' ? amount(reportAudit.actualMoneyOnHand) : 0,
+            differenceNote: reportType === 'tithes-offerings' ? reportAudit.differenceNote.trim() : '',
           }
         : {
             ...reportRange,
             reportType,
             adminName: authUser?.fullName || '',
             accountingName: '',
+            differenceNote: reportType === 'tithes-offerings' ? reportAudit.differenceNote.trim() : '',
             useDeaconLooseOffering: reportType === 'tithes-offerings',
           };
     const result = await run('', () => window.faithflow.exportReportExcel(filters));
@@ -1434,7 +1460,7 @@ function App() {
   async function exportReportPdf() {
     const role = normalizeRole(authUser?.role);
     if ((role === 'Deacon' || role === 'Pastor') && reportType === 'tithes-offerings' && !String(reportAudit.actualMoneyOnHand).trim()) {
-      setError('Actual Money On Hand is required.');
+      setError('Cash Count is required.');
       return;
     }
     const result = await run('', () =>
@@ -1535,6 +1561,11 @@ function App() {
   const isDeaconRole = role === 'Deacon' || role === 'Pastor';
   const isThanksgivingReport = reportType === 'thanksgiving';
   const liveExpenseTotal = reportPreview?.summary.expensesTotal ?? report?.summary.expensesTotal ?? 0;
+  const liveTotalOfferings = reportPreview?.summary.auditedAmount ?? report?.summary.auditedAmount ?? 0;
+  const liveDifferenceRaw = isThanksgivingReport ? 0 : amount(reportAudit.actualMoneyOnHand) - liveTotalOfferings;
+  const liveDifferenceLabel =
+    liveDifferenceRaw < 0 ? 'Loose Offerings' : liveDifferenceRaw > 0 ? 'Excess' : 'Balanced';
+  const liveDifferenceAmount = Math.abs(liveDifferenceRaw);
   const liveCashOnHandValue = isThanksgivingReport
     ? 0
     : isDeaconRole
@@ -2374,7 +2405,7 @@ function App() {
                 {isDeaconRole && !isThanksgivingReport && (
                   <>
                     <label>
-                      Total Audited Amount
+                      Total Offerings
                       <input
                         type="number"
                         min="0"
@@ -2398,6 +2429,25 @@ function App() {
                         Denominations
                       </button>
                     </div>
+                    <label>
+                      {liveDifferenceLabel}
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={String(liveDifferenceAmount)}
+                        readOnly
+                      />
+                    </label>
+                    <label>
+                      Loose / Excess Note
+                      <textarea
+                        rows={2}
+                        placeholder="Optional note for discrepancy"
+                        value={reportAudit.differenceNote}
+                        onChange={(e) => setReportAudit((p) => ({ ...p, differenceNote: e.target.value }))}
+                      />
+                    </label>
                     <label>
                       Total Expenses
                       <input
@@ -2423,12 +2473,12 @@ function App() {
                 {!isDeaconRole && !isThanksgivingReport && (
                   <>
                     <label>
-                      Loose Offerings (from Deacon Generated Reports)
+                      {reportPreview?.summary.differenceLabel || report?.summary.differenceLabel || 'Loose / Excess'}
                       <input
                         type="number"
                         min="0"
                         step="0.01"
-                        value={String(reportPreview?.summary.looseOfferings ?? report?.summary.looseOfferings ?? 0)}
+                        value={String(reportPreview?.summary.differenceAmount ?? report?.summary.differenceAmount ?? 0)}
                         readOnly
                       />
                     </label>
@@ -2449,6 +2499,14 @@ function App() {
                         min="0"
                         step="0.01"
                         value={String(liveCashOnHandValue)}
+                        readOnly
+                      />
+                    </label>
+                    <label>
+                      Loose / Excess Note
+                      <textarea
+                        rows={2}
+                        value={reportPreview?.summary.differenceNote ?? report?.summary.differenceNote ?? ''}
                         readOnly
                       />
                     </label>
@@ -2480,7 +2538,7 @@ function App() {
                       <p className="muted">Generated: {g.createdAt}</p>
                       <div className="inline-actions mt-2">
                         <button type="button" className="tiny" onClick={() => openGeneratedReport(g.id)}>Open</button>
-                        <button type="button" className="tiny secondary" onClick={() => exportGeneratedReport(g.id)}>Download</button>
+                        <button type="button" className="tiny secondary" onClick={() => setGeneratedDownloadId(g.id)}>Download</button>
                         <button type="button" className="tiny secondary" onClick={() => printGeneratedReport(g.id)}>Print</button>
                         <button type="button" className="tiny danger" onClick={() => removeGeneratedReport(g.id)}>Delete</button>
                       </div>
@@ -2524,28 +2582,16 @@ function App() {
                           </tr>
                         ))}
                       </tbody>
-                      <tfoot>
-                        <tr>
-                          <th></th>
-                          <th>Grand Total</th>
-                          <th>{money(report.reportType === 'thanksgiving' ? report.summary.thanksgiving : report.summary.tithes)}</th>
-                          {report.reportType === 'thanksgiving' ? null : <th>{money(report.summary.faithPromise)}</th>}
-                          <th>{money(report.summary.total)}</th>
-                        </tr>
-                      </tfoot>
                     </table>
                   </div>
+                  <div className="totals report-table-total">
+                    <div>Grand Total</div>
+                    <div>{report.reportType === 'thanksgiving' ? `Thanksgiving: ${money(report.summary.thanksgiving)}` : `Tithes: ${money(report.summary.tithes)}`}</div>
+                    {report.reportType === 'thanksgiving' ? null : <div>{`Faith Promise: ${money(report.summary.faithPromise)}`}</div>}
+                    <div className="grand">Total: {money(report.summary.total)}</div>
+                  </div>
                   {report.reportType === 'tithes-offerings' && (
-                    <div className="totals">
-                      <div>Total Audited Amount: {money(report.summary.auditedAmount)}</div>
-                      <div>Cash Count: {money(report.summary.actualMoneyOnHand)}</div>
-                      <div className="grand">Loose Offerings: {money(report.summary.looseOfferings)}</div>
-                      <div>Total Expenses: {money(report.summary.expensesTotal)}</div>
-                      <div className="grand">Cash on Hand: {money(report.summary.cashOnNet)}</div>
-                    </div>
-                  )}
-                  {report.reportType === 'tithes-offerings' && (
-                    <section className="thanksgiving-page">
+                    <section className="report-section">
                       <header className="print-header">
                         <h3>Bible Baptist Church</h3>
                         <p>Expenses</p>
@@ -2576,17 +2622,26 @@ function App() {
                               </tr>
                             )}
                           </tbody>
-                          <tfoot>
-                            <tr>
-                              <th></th>
-                              <th>Total Expenses</th>
-                              <th>{money(report.summary.expensesTotal)}</th>
-                              <th></th>
-                            </tr>
-                          </tfoot>
                         </table>
                       </div>
+                      <div className="totals report-table-total">
+                        <div className="grand">Total Expenses: {money(report.summary.expensesTotal)}</div>
+                      </div>
                     </section>
+                  )}
+                  {report.reportType === 'tithes-offerings' && (
+                    <div className="totals">
+                      <div>Total Offerings: {money(report.summary.auditedAmount)}</div>
+                      <div>Cash Count: {money(report.summary.actualMoneyOnHand)}</div>
+                      <div className="grand">{report.summary.differenceLabel}: {money(report.summary.differenceAmount)}</div>
+                      <div>Total Expenses: {money(report.summary.expensesTotal)}</div>
+                      <div className="grand">Cash on Hand: {money(report.summary.cashOnNet)}</div>
+                    </div>
+                  )}
+                  {report.reportType === 'tithes-offerings' && !!report.summary.differenceNote && (
+                    <div className="report-note">
+                      <strong>{report.summary.differenceLabel} Note:</strong> {report.summary.differenceNote}
+                    </div>
                   )}
 
                   <div className="signatories">
@@ -2812,6 +2867,25 @@ function App() {
             <div className="row-actions">
               <button type="button" className="secondary" onClick={() => setServerVersions([])}>
                 Close
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+      {generatedDownloadId !== null && (
+        <div className="modal-backdrop" role="presentation">
+          <section className="modal-card">
+            <h3>Download Generated Report</h3>
+            <p className="muted">Choose the file format for this generated report.</p>
+            <div className="row-actions">
+              <button type="button" onClick={() => void exportGeneratedReportExcel(generatedDownloadId)} disabled={busy}>
+                Excel
+              </button>
+              <button type="button" className="secondary" onClick={() => void exportGeneratedReportPdf(generatedDownloadId)} disabled={busy}>
+                PDF
+              </button>
+              <button type="button" className="secondary" onClick={() => setGeneratedDownloadId(null)}>
+                Cancel
               </button>
             </div>
           </section>

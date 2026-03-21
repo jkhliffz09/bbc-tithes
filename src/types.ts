@@ -79,6 +79,9 @@ export type ReportSummary = {
   variance: number;
   expensesTotal: number;
   cashOnNet: number;
+  differenceLabel: 'Loose Offerings' | 'Excess' | 'Balanced';
+  differenceAmount: number;
+  differenceNote: string;
   total: number;
 };
 
@@ -175,12 +178,12 @@ declare global {
       updateExpense: (payload: Partial<Expense> & { id: number }) => Promise<Expense>;
       deleteExpense: (id: number) => Promise<{ success: true }>;
 
-      generateReport: (filters: { dateFrom: string; dateTo: string; reportType?: ReportType; adminName?: string; accountingName?: string; deacon1Name?: string; deacon2Name?: string; actualMoneyOnHand?: number; useDeaconLooseOffering?: boolean; forceNew?: boolean }) => Promise<GenerateReportResult>;
-      previewReport: (filters: { dateFrom: string; dateTo: string; reportType?: ReportType; adminName?: string; accountingName?: string; useDeaconLooseOffering?: boolean }) => Promise<ReportPayload>;
+      generateReport: (filters: { dateFrom: string; dateTo: string; reportType?: ReportType; adminName?: string; accountingName?: string; deacon1Name?: string; deacon2Name?: string; actualMoneyOnHand?: number; differenceNote?: string; useDeaconLooseOffering?: boolean; forceNew?: boolean }) => Promise<GenerateReportResult>;
+      previewReport: (filters: { dateFrom: string; dateTo: string; reportType?: ReportType; adminName?: string; accountingName?: string; differenceNote?: string; useDeaconLooseOffering?: boolean }) => Promise<ReportPayload>;
       listGeneratedReports: (filters: { dateFrom: string; dateTo: string; reportType?: ReportType }) => Promise<GeneratedReportItem[]>;
       getGeneratedReport: (id: number) => Promise<{ id: number; dateFrom: string; dateTo: string; createdAt: string; report: ReportPayload }>;
       deleteGeneratedReport: (id: number) => Promise<{ success: true }>;
-      exportReportExcel: (filters: { dateFrom: string; dateTo: string; reportType?: ReportType; adminName?: string; accountingName?: string; deacon1Name?: string; deacon2Name?: string; actualMoneyOnHand?: number; useDeaconLooseOffering?: boolean }) => Promise<ImportExportResult>;
+      exportReportExcel: (filters: { dateFrom: string; dateTo: string; reportType?: ReportType; adminName?: string; accountingName?: string; deacon1Name?: string; deacon2Name?: string; actualMoneyOnHand?: number; differenceNote?: string; useDeaconLooseOffering?: boolean }) => Promise<ImportExportResult>;
       exportReportPdf: (filters: { dateFrom: string; dateTo: string; reportType?: ReportType }) => Promise<ImportExportResult>;
       exportGeneratedReportExcel: (id: number) => Promise<ImportExportResult>;
       importMembersTemplate: () => Promise<ImportExportResult>;

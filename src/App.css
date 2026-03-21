@@ -214,8 +214,16 @@ tfoot th {
   @apply text-slate-500;
 }
 
-.thanksgiving-page {
+.report-section {
   @apply mt-6;
+}
+
+.report-table-total {
+  @apply mt-3;
+}
+
+.report-note {
+  @apply mb-2.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900;
 }
 
 .autocomplete-list {
@@ -398,9 +406,9 @@ tfoot th {
     display: none !important;
   }
 
-  .thanksgiving-page {
-    page-break-before: always;
-    break-before: page;
+  .report-section {
+    page-break-before: auto;
+    break-before: auto;
   }
 
   .signatory-line small {
