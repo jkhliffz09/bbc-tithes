@@ -2701,19 +2701,19 @@ function App() {
                     <div className="report-computation">
                       <h4>Computation</h4>
                       <div className="totals">
-                      <div>Total Offerings: {money(report.summary.auditedAmount)}</div>
-                      <div>Cash Count: {money(report.summary.actualMoneyOnHand)}</div>
-                      {report.summary.differenceLabel ? (
-                        <div className="grand">{report.summary.differenceLabel}: {reportDifferenceMoney(report.summary.differenceLabel, report.summary.differenceAmount)}</div>
-                      ) : null}
-                      <div>Total Expenses: {money(report.summary.expensesTotal)}</div>
-                      <div className="grand">Cash on Hand: {money(report.summary.cashOnNet)}</div>
+                        <div>Total Offerings: {money(report.summary.auditedAmount)}</div>
+                        <div>Cash Count: {money(report.summary.actualMoneyOnHand)}</div>
+                        {report.summary.differenceLabel ? (
+                          <div className="grand">
+                            <div>{report.summary.differenceLabel}: {reportDifferenceMoney(report.summary.differenceLabel, report.summary.differenceAmount)}</div>
+                            {!!report.summary.differenceNote && (
+                              <small className="report-difference-note">{report.summary.differenceNote}</small>
+                            )}
+                          </div>
+                        ) : null}
+                        <div>Total Expenses: {money(report.summary.expensesTotal)}</div>
+                        <div className="grand">Cash on Hand: {money(report.summary.cashOnNet)}</div>
                       </div>
-                    </div>
-                  )}
-                  {report.reportType === 'tithes-offerings' && !!report.summary.differenceLabel && !!report.summary.differenceNote && (
-                    <div className="report-note">
-                      <strong>{report.summary.differenceLabel} Note:</strong> {report.summary.differenceNote}
                     </div>
                   )}
 

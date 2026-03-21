@@ -762,6 +762,7 @@ app.whenReady().then(() => {
           dateTo: selectedDate,
           reportType: filters?.reportType,
           actualMoneyOnHand: Number(filters?.actualMoneyOnHand || 0),
+          differenceNote: String(filters?.differenceNote || '').trim(),
           deacon1Name: role === 'Pastor' ? String(sessionUser?.fullName || '').trim() : '',
           deacon2Name: role === 'Pastor' ? '' : '',
           skipDeaconInference: role === 'Pastor',
@@ -773,6 +774,7 @@ app.whenReady().then(() => {
           reportType: filters?.reportType,
           adminName: String(filters?.adminName || '').trim(),
           accountingName: String(filters?.accountingName || '').trim(),
+          differenceNote: String(filters?.differenceNote || '').trim(),
           useDeaconLooseOffering: true,
         });
       }
@@ -815,6 +817,7 @@ app.whenReady().then(() => {
             dateTo: selectedDate,
             reportType: filters?.reportType,
             actualMoneyOnHand: 0,
+            differenceNote: String(filters?.differenceNote || '').trim(),
             deacon1Name: role === 'Pastor' ? String(sessionUser?.fullName || '').trim() : '',
             deacon2Name: role === 'Pastor' ? '' : '',
             skipDeaconInference: role === 'Pastor',
@@ -829,6 +832,7 @@ app.whenReady().then(() => {
           reportType: filters?.reportType,
           adminName: String(filters?.adminName || '').trim(),
           accountingName: String(filters?.accountingName || '').trim(),
+          differenceNote: String(filters?.differenceNote || '').trim(),
           useDeaconLooseOffering: true,
         }),
       };
@@ -895,6 +899,7 @@ app.whenReady().then(() => {
             dateTo: selectedDate,
             reportType: filters?.reportType,
             actualMoneyOnHand: Number(filters?.actualMoneyOnHand || 0),
+            differenceNote: String(filters?.differenceNote || '').trim(),
             deacon1Name: role === 'Pastor' ? String(sessionUser?.fullName || '').trim() : '',
             deacon2Name: role === 'Pastor' ? '' : '',
             skipDeaconInference: role === 'Pastor',
@@ -910,6 +915,7 @@ app.whenReady().then(() => {
           reportType: filters?.reportType,
           adminName: String(filters?.adminName || '').trim(),
           accountingName: String(filters?.accountingName || '').trim(),
+          differenceNote: String(filters?.differenceNote || '').trim(),
           useDeaconLooseOffering: true,
         }),
       };

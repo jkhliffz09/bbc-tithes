@@ -190,6 +190,10 @@ tfoot th {
   @apply bg-sky-100 font-semibold;
 }
 
+.report-difference-note {
+  @apply mt-1 block text-xs font-normal text-slate-600;
+}
+
 .print-header {
   @apply mb-3;
 }
@@ -262,12 +266,6 @@ tfoot th {
 
 .report-computation h4 {
   @apply mb-3 text-lg font-semibold text-sky-900;
-}
-
-.report-note {
-  @apply mb-2.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900;
-  break-inside: avoid;
-  page-break-inside: avoid;
 }
 
 .autocomplete-list {
@@ -456,7 +454,6 @@ tfoot th {
   }
 
   .report-computation,
-  .report-note,
   .signatories,
   .report-table-total {
     break-inside: avoid;
