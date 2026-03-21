@@ -1564,7 +1564,7 @@ function App() {
   const liveTotalOfferings = reportPreview?.summary.auditedAmount ?? report?.summary.auditedAmount ?? 0;
   const liveDifferenceRaw = isThanksgivingReport ? 0 : amount(reportAudit.actualMoneyOnHand) - liveTotalOfferings;
   const liveDifferenceLabel =
-    liveDifferenceRaw < 0 ? 'Loose Offerings' : liveDifferenceRaw > 0 ? 'Excess' : 'Balanced';
+    liveDifferenceRaw < 0 ? 'Loose Offerings' : liveDifferenceRaw > 0 ? 'Excess' : '';
   const liveDifferenceAmount = Math.abs(liveDifferenceRaw);
   const liveCashOnHandValue = isThanksgivingReport
     ? 0
@@ -2430,7 +2430,7 @@ function App() {
                       </button>
                     </div>
                     <label>
-                      {liveDifferenceLabel}
+                      {liveDifferenceLabel || 'Loose / Excess'}
                       <input
                         type="number"
                         min="0"
@@ -2584,11 +2584,18 @@ function App() {
                       </tbody>
                     </table>
                   </div>
-                  <div className="totals report-table-total">
-                    <div>Grand Total</div>
-                    <div>{report.reportType === 'thanksgiving' ? `Thanksgiving: ${money(report.summary.thanksgiving)}` : `Tithes: ${money(report.summary.tithes)}`}</div>
-                    {report.reportType === 'thanksgiving' ? null : <div>{`Faith Promise: ${money(report.summary.faithPromise)}`}</div>}
-                    <div className="grand">Total: {money(report.summary.total)}</div>
+                  <div className="table-wrap report-table-total">
+                    <table className="report-summary-table">
+                      <tbody>
+                        <tr>
+                          <td></td>
+                          <td><strong>Grand Total</strong></td>
+                          <td>{money(report.reportType === 'thanksgiving' ? report.summary.thanksgiving : report.summary.tithes)}</td>
+                          {report.reportType === 'thanksgiving' ? null : <td>{money(report.summary.faithPromise)}</td>}
+                          <td><strong>{money(report.summary.total)}</strong></td>
+                        </tr>
+                      </tbody>
+                    </table>
                   </div>
                   {report.reportType === 'tithes-offerings' && (
                     <section className="report-section">
@@ -2624,21 +2631,35 @@ function App() {
                           </tbody>
                         </table>
                       </div>
-                      <div className="totals report-table-total">
-                        <div className="grand">Total Expenses: {money(report.summary.expensesTotal)}</div>
+                      <div className="table-wrap report-table-total">
+                        <table className="report-summary-table">
+                          <tbody>
+                            <tr>
+                              <td></td>
+                              <td><strong>Total Expenses</strong></td>
+                              <td><strong>{money(report.summary.expensesTotal)}</strong></td>
+                              <td></td>
+                            </tr>
+                          </tbody>
+                        </table>
                       </div>
                     </section>
                   )}
                   {report.reportType === 'tithes-offerings' && (
-                    <div className="totals">
+                    <div className="report-computation">
+                      <h4>Computation</h4>
+                      <div className="totals">
                       <div>Total Offerings: {money(report.summary.auditedAmount)}</div>
                       <div>Cash Count: {money(report.summary.actualMoneyOnHand)}</div>
-                      <div className="grand">{report.summary.differenceLabel}: {money(report.summary.differenceAmount)}</div>
+                      {report.summary.differenceLabel ? (
+                        <div className="grand">{report.summary.differenceLabel}: {money(report.summary.differenceAmount)}</div>
+                      ) : null}
                       <div>Total Expenses: {money(report.summary.expensesTotal)}</div>
                       <div className="grand">Cash on Hand: {money(report.summary.cashOnNet)}</div>
+                      </div>
                     </div>
                   )}
-                  {report.reportType === 'tithes-offerings' && !!report.summary.differenceNote && (
+                  {report.reportType === 'tithes-offerings' && !!report.summary.differenceLabel && !!report.summary.differenceNote && (
                     <div className="report-note">
                       <strong>{report.summary.differenceLabel} Note:</strong> {report.summary.differenceNote}
                     </div>

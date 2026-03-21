@@ -79,7 +79,7 @@ export type ReportSummary = {
   variance: number;
   expensesTotal: number;
   cashOnNet: number;
-  differenceLabel: 'Loose Offerings' | 'Excess' | 'Balanced';
+  differenceLabel: '' | 'Loose Offerings' | 'Excess';
   differenceAmount: number;
   differenceNote: string;
   total: number;

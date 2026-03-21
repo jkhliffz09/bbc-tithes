@@ -21,7 +21,7 @@ function loadEnvFile() {
 
 loadEnvFile();
 
-const PORT = Number(process.env.SYNC_PORT || 8787);
+const PORT = Number(process.env.PORT || process.env.SYNC_PORT || 8787);
 const HOST = process.env.SYNC_HOST || '0.0.0.0';
 const API_TOKEN = String(process.env.SYNC_API_TOKEN || '').trim();
 const DATA_DIR = process.env.SYNC_DATA_DIR || path.join(__dirname, 'data');

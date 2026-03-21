@@ -199,7 +199,7 @@ tfoot th {
 }
 
 .signatories {
-  @apply mt-6 grid grid-cols-1 gap-6 md:grid-cols-2;
+  @apply mt-6 grid grid-cols-2 gap-6;
 }
 
 .signatory-line {
@@ -220,6 +220,18 @@ tfoot th {
 
 .report-table-total {
   @apply mt-3;
+}
+
+.report-summary-table td {
+  @apply bg-slate-50 font-medium;
+}
+
+.report-computation {
+  @apply mb-3 rounded-xl border-2 border-sky-300 bg-sky-50 p-4 shadow-sm;
+}
+
+.report-computation h4 {
+  @apply mb-3 text-lg font-semibold text-sky-900;
 }
 
 .report-note {

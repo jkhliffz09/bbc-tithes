@@ -43,6 +43,50 @@ function normalizeReportType(reportType) {
     : 'tithes-offerings';
 }
 
+function normalizeDifferenceSummary(summary = {}) {
+  const auditedAmount = valueToNumber(summary?.auditedAmount);
+  const actualMoneyOnHand = valueToNumber(summary?.actualMoneyOnHand);
+  const variance = valueToNumber(summary?.variance);
+  const rawLabel = String(summary?.differenceLabel || '').trim();
+  const rawAmount = valueToNumber(summary?.differenceAmount);
+  const legacyLoose = valueToNumber(summary?.looseOfferings);
+
+  let difference = 0;
+  if (rawLabel === 'Loose Offerings') {
+    difference = -Math.abs(rawAmount || legacyLoose || variance || actualMoneyOnHand - auditedAmount);
+  } else if (rawLabel === 'Excess') {
+    difference = Math.abs(rawAmount || variance || actualMoneyOnHand - auditedAmount);
+  } else if (rawAmount !== 0) {
+    difference = rawAmount;
+  } else if (legacyLoose !== 0) {
+    difference = -Math.abs(legacyLoose);
+  } else if (variance !== 0) {
+    difference = variance;
+  } else {
+    difference = actualMoneyOnHand - auditedAmount;
+  }
+
+  if (difference < 0) {
+    return {
+      differenceLabel: 'Loose Offerings',
+      differenceAmount: Math.abs(difference),
+      looseOfferings: Math.abs(difference),
+    };
+  }
+  if (difference > 0) {
+    return {
+      differenceLabel: 'Excess',
+      differenceAmount: difference,
+      looseOfferings: 0,
+    };
+  }
+  return {
+    differenceLabel: '',
+    differenceAmount: 0,
+    looseOfferings: 0,
+  };
+}
+
 function hashPassword(password) {
   return crypto.createHash('sha256').update(String(password)).digest('hex');
 }
@@ -1212,12 +1256,10 @@ class DataService {
         (!!String(signatory.deacon1Name || '').trim() || !!String(signatory.deacon2Name || '').trim());
       if (!isDeaconGenerated) continue;
       if (!byDate.has(rDateFrom)) {
-        const differenceLabel = String(report?.summary?.differenceLabel || '').trim();
-        const differenceAmount = valueToNumber(report?.summary?.differenceAmount);
-        const legacyLoose = valueToNumber(report?.summary?.looseOfferings);
+        const normalizedDifference = normalizeDifferenceSummary(report?.summary || {});
         byDate.set(rDateFrom, {
-          loose: differenceLabel === 'Loose Offerings' ? differenceAmount : legacyLoose,
-          excess: differenceLabel === 'Excess' ? differenceAmount : 0,
+          loose: normalizedDifference.looseOfferings,
+          excess: normalizedDifference.differenceLabel === 'Excess' ? normalizedDifference.differenceAmount : 0,
           audited: valueToNumber(report?.summary?.auditedAmount),
           note: String(report?.summary?.differenceNote || '').trim(),
         });
@@ -1320,7 +1362,7 @@ class DataService {
         differenceAmount = variance;
         looseOfferings = 0;
       } else {
-        differenceLabel = 'Balanced';
+        differenceLabel = '';
         differenceAmount = 0;
         looseOfferings = 0;
       }
@@ -1428,6 +1470,7 @@ class DataService {
     } catch {
       throw new Error('Generated report payload is invalid.');
     }
+    const normalizedDifference = normalizeDifferenceSummary(report?.summary || {});
     return {
       id: row.id,
       dateFrom: row.dateFrom,
@@ -1441,15 +1484,15 @@ class DataService {
             summary: {
               tithes: valueToNumber(report?.summary?.tithes),
               faithPromise: valueToNumber(report?.summary?.faithPromise),
-              looseOfferings: valueToNumber(report?.summary?.looseOfferings),
+              looseOfferings: normalizedDifference.looseOfferings,
               thanksgiving: valueToNumber(report?.summary?.thanksgiving),
               auditedAmount: valueToNumber(report?.summary?.auditedAmount),
               actualMoneyOnHand: valueToNumber(report?.summary?.actualMoneyOnHand),
               variance: valueToNumber(report?.summary?.variance),
               expensesTotal: valueToNumber(report?.summary?.expensesTotal),
               cashOnNet: valueToNumber(report?.summary?.cashOnNet),
-              differenceLabel: String(report?.summary?.differenceLabel || '').trim() || 'Balanced',
-              differenceAmount: valueToNumber(report?.summary?.differenceAmount || report?.summary?.looseOfferings),
+              differenceLabel: normalizedDifference.differenceLabel,
+              differenceAmount: normalizedDifference.differenceAmount,
               differenceNote: String(report?.summary?.differenceNote || '').trim(),
               total: valueToNumber(report?.summary?.total),
             },
