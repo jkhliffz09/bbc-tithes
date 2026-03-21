@@ -2562,6 +2562,24 @@ function App() {
 
                   <div className="table-wrap">
                     <table>
+                      <colgroup>
+                        {report.reportType === 'thanksgiving' ? (
+                          <>
+                            <col className="report-col-code" />
+                            <col className="report-col-member" />
+                            <col className="report-col-amount" />
+                            <col className="report-col-total" />
+                          </>
+                        ) : (
+                          <>
+                            <col className="report-col-code" />
+                            <col className="report-col-member" />
+                            <col className="report-col-amount" />
+                            <col className="report-col-amount" />
+                            <col className="report-col-total" />
+                          </>
+                        )}
+                      </colgroup>
                       <thead>
                         <tr>
                           <th>Code</th>
@@ -2586,6 +2604,24 @@ function App() {
                   </div>
                   <div className="table-wrap report-table-total">
                     <table className="report-summary-table">
+                      <colgroup>
+                        {report.reportType === 'thanksgiving' ? (
+                          <>
+                            <col className="report-col-code" />
+                            <col className="report-col-member" />
+                            <col className="report-col-amount" />
+                            <col className="report-col-total" />
+                          </>
+                        ) : (
+                          <>
+                            <col className="report-col-code" />
+                            <col className="report-col-member" />
+                            <col className="report-col-amount" />
+                            <col className="report-col-amount" />
+                            <col className="report-col-total" />
+                          </>
+                        )}
+                      </colgroup>
                       <tbody>
                         <tr>
                           <td></td>
@@ -2606,6 +2642,12 @@ function App() {
                       </header>
                       <div className="table-wrap">
                         <table>
+                          <colgroup>
+                            <col className="report-col-date" />
+                            <col className="report-col-expense" />
+                            <col className="report-col-amount" />
+                            <col className="report-col-notes" />
+                          </colgroup>
                           <thead>
                             <tr>
                               <th>Date</th>
@@ -2633,6 +2675,12 @@ function App() {
                       </div>
                       <div className="table-wrap report-table-total">
                         <table className="report-summary-table">
+                          <colgroup>
+                            <col className="report-col-date" />
+                            <col className="report-col-expense" />
+                            <col className="report-col-amount" />
+                            <col className="report-col-notes" />
+                          </colgroup>
                           <tbody>
                             <tr>
                               <td></td>

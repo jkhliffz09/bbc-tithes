@@ -222,12 +222,42 @@ tfoot th {
   @apply mt-3;
 }
 
+.report-col-code {
+  width: 10%;
+}
+
+.report-col-member {
+  width: 34%;
+}
+
+.report-col-amount {
+  width: 18%;
+}
+
+.report-col-total {
+  width: 20%;
+}
+
+.report-col-date {
+  width: 20%;
+}
+
+.report-col-expense {
+  width: 34%;
+}
+
+.report-col-notes {
+  width: 28%;
+}
+
 .report-summary-table td {
   @apply bg-slate-50 font-medium;
 }
 
 .report-computation {
   @apply mb-3 rounded-xl border-2 border-sky-300 bg-sky-50 p-4 shadow-sm;
+  break-inside: avoid;
+  page-break-inside: avoid;
 }
 
 .report-computation h4 {
@@ -236,6 +266,8 @@ tfoot th {
 
 .report-note {
   @apply mb-2.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900;
+  break-inside: avoid;
+  page-break-inside: avoid;
 }
 
 .autocomplete-list {
@@ -421,6 +453,14 @@ tfoot th {
   .report-section {
     page-break-before: auto;
     break-before: auto;
+  }
+
+  .report-computation,
+  .report-note,
+  .signatories,
+  .report-table-total {
+    break-inside: avoid;
+    page-break-inside: avoid;
   }
 
   .signatory-line small {
